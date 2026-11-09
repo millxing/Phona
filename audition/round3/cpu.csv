@@ -1,0 +1,9 @@
+case,os,median_core_percent,min_core_percent,max_core_percent,finite_audio,anomalous_audio
+female-phrase,1,5.295865625,5.276472925,5.3369052,False,True
+female-phrase,2,12.609728125,12.542967725,12.784620825000001,True,False
+female-vowel-i-u,1,5.616825,5.564329175,5.70523855,False,True
+female-vowel-i-u,2,12.9325521,12.866630225,12.983072925,True,False
+male-phrase,1,5.748520825,5.7221135499999995,5.77902915,True,True
+male-phrase,2,13.446987499999999,13.414771875000001,13.549604174999999,True,False
+male-vowel-i-u,1,6.0244948,6.00524375,6.1279770749999996,True,True
+male-vowel-i-u,2,13.729263524999999,13.689652075,13.767501025000001,True,False

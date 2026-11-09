@@ -1,0 +1,4 @@
+   Compiling chimera-audition-tool v0.1.0 (/Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool)
+    Finished `release` profile [optimized] target(s) in 0.33s
+     Running `spike/audition-tool/target/release/round3 spike/audition-tool/raw-round3`
+Rendered 100 control/reference files and 8 quality files

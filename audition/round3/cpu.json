@@ -1,0 +1,74 @@
+[
+  {
+    "case": "female-phrase",
+    "os": 1,
+    "median_core_percent": 5.295865625,
+    "min_core_percent": 5.276472925,
+    "max_core_percent": 5.3369052,
+    "finite_audio": false,
+    "anomalous_audio": true
+  },
+  {
+    "case": "female-phrase",
+    "os": 2,
+    "median_core_percent": 12.609728125,
+    "min_core_percent": 12.542967725,
+    "max_core_percent": 12.784620825000001,
+    "finite_audio": true,
+    "anomalous_audio": false
+  },
+  {
+    "case": "female-vowel-i-u",
+    "os": 1,
+    "median_core_percent": 5.616825,
+    "min_core_percent": 5.564329175,
+    "max_core_percent": 5.70523855,
+    "finite_audio": false,
+    "anomalous_audio": true
+  },
+  {
+    "case": "female-vowel-i-u",
+    "os": 2,
+    "median_core_percent": 12.9325521,
+    "min_core_percent": 12.866630225,
+    "max_core_percent": 12.983072925,
+    "finite_audio": true,
+    "anomalous_audio": false
+  },
+  {
+    "case": "male-phrase",
+    "os": 1,
+    "median_core_percent": 5.748520825,
+    "min_core_percent": 5.7221135499999995,
+    "max_core_percent": 5.77902915,
+    "finite_audio": true,
+    "anomalous_audio": true
+  },
+  {
+    "case": "male-phrase",
+    "os": 2,
+    "median_core_percent": 13.446987499999999,
+    "min_core_percent": 13.414771875000001,
+    "max_core_percent": 13.549604174999999,
+    "finite_audio": true,
+    "anomalous_audio": false
+  },
+  {
+    "case": "male-vowel-i-u",
+    "os": 1,
+    "median_core_percent": 6.0244948,
+    "min_core_percent": 6.00524375,
+    "max_core_percent": 6.1279770749999996,
+    "finite_audio": true,
+    "anomalous_audio": true
+  },
+  {
+    "case": "male-vowel-i-u",
+    "os": 2,
+    "median_core_percent": 13.729263524999999,
+    "min_core_percent": 13.689652075,
+    "max_core_percent": 13.767501025000001,
+    "finite_audio": true,
+    "anomalous_audio": false
+  }
+]

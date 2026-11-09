@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Third-party: upstream engine is its own git clone (pinned 092b16ce), SDK is a download
+/upstream/
+/sdk/
+
+# Build output
+target/
+/rack-plugin/build/
+/rack-plugin/dep/
+/rack-plugin/dist/
+/rack-plugin/plugin.dylib
+
+# Rendered audio (reproducible with spike/audition-tool); keep READMEs, CSV/JSON metrics
+*.wav
+*.f32
+__pycache__/

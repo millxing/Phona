@@ -1,0 +1,40 @@
+   Compiling chimera-audition-tool v0.1.0 (/Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool)
+    Finished `release` profile [optimized] target(s) in 0.41s
+     Running `spike/audition-tool/target/release/round2 /Users/robschoen/Dropbox/CC/Chimera/audition/round2/parameters.json /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw-round2`
+A_female-a3-e4-default: 190691 samples
+B_female-a3-e4-breathiness-0p35: 190691 samples
+B_female-a3-e4-tension-0p70: 190691 samples
+B_female-a3-e4-tension-0p30: 190691 samples
+B_female-a3-e4-brightness-0p55: 190691 samples
+B_female-a3-e4-pressure-9: 190691 samples
+B_female-a3-e4-child-axis-0p30: 190691 samples
+B_female-a3-e4-larynx-raised-0p5cm: 190691 samples
+B_female-a3-e4-combined-best-guess: 190691 samples
+A_female-a4-e5-default: 190691 samples
+B_female-a4-e5-breathiness-0p35: 190691 samples
+B_female-a4-e5-tension-0p70: 190691 samples
+B_female-a4-e5-tension-0p30: 190691 samples
+B_female-a4-e5-brightness-0p55: 190691 samples
+B_female-a4-e5-pressure-9: 190691 samples
+B_female-a4-e5-child-axis-0p30: 190691 samples
+B_female-a4-e5-larynx-raised-0p5cm: 190691 samples
+B_female-a4-e5-combined-best-guess: 190691 samples
+C_male-baritone-g2-d3-default: 190691 samples
+C_male-tenor-c4-g4-default: 190691 samples
+C_male-tenor-c4-g4-belt-brightness-0p55-pressure-10: 190691 samples
+D_male-147hz-depth-0c-rate-5p5hz: 168000 samples
+D_male-147hz-depth-15c-rate-5p5hz: 168000 samples
+D_male-147hz-depth-30c-rate-5p5hz: 168000 samples
+D_male-147hz-depth-50c-rate-5p5hz: 168000 samples
+D_male-147hz-depth-80c-rate-5p5hz: 168000 samples
+D_male-147hz-depth-30c-rate-4p5hz: 168000 samples
+D_male-147hz-depth-30c-rate-6p5hz: 168000 samples
+D_male-147hz-depth-30c-rate-5p5hz-delayed-600ms: 168000 samples
+D_female-294hz-depth-0c-rate-5p5hz: 168000 samples
+D_female-294hz-depth-15c-rate-5p5hz: 168000 samples
+D_female-294hz-depth-30c-rate-5p5hz: 168000 samples
+D_female-294hz-depth-50c-rate-5p5hz: 168000 samples
+D_female-294hz-depth-80c-rate-5p5hz: 168000 samples
+D_female-294hz-depth-30c-rate-4p5hz: 168000 samples
+D_female-294hz-depth-30c-rate-6p5hz: 168000 samples
+D_female-294hz-depth-30c-rate-5p5hz-delayed-600ms: 168000 samples

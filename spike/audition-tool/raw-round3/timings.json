@@ -1,0 +1,362 @@
+[
+  {
+    "core_percent": 12.651919775000001,
+    "first_nonfinite_seconds": null,
+    "name": "quality-female-phrase-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 0,
+    "seconds": 0.506076791
+  },
+  {
+    "core_percent": 5.3369052,
+    "first_nonfinite_seconds": 0.25377083333333333,
+    "name": "quality-female-phrase-os1",
+    "nonfinite": 179819,
+    "os": 1,
+    "rep": 0,
+    "seconds": 0.213476208
+  },
+  {
+    "core_percent": 5.295865625,
+    "first_nonfinite_seconds": 0.25377083333333333,
+    "name": "quality-female-phrase-os1",
+    "nonfinite": 179819,
+    "os": 1,
+    "rep": 1,
+    "seconds": 0.211834625
+  },
+  {
+    "core_percent": 12.542967725,
+    "first_nonfinite_seconds": null,
+    "name": "quality-female-phrase-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 1,
+    "seconds": 0.501718709
+  },
+  {
+    "core_percent": 12.599208325,
+    "first_nonfinite_seconds": null,
+    "name": "quality-female-phrase-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 2,
+    "seconds": 0.503968333
+  },
+  {
+    "core_percent": 5.32250625,
+    "first_nonfinite_seconds": 0.25377083333333333,
+    "name": "quality-female-phrase-os1",
+    "nonfinite": 179819,
+    "os": 1,
+    "rep": 2,
+    "seconds": 0.21290025
+  },
+  {
+    "core_percent": 5.276472925,
+    "first_nonfinite_seconds": 0.25377083333333333,
+    "name": "quality-female-phrase-os1",
+    "nonfinite": 179819,
+    "os": 1,
+    "rep": 3,
+    "seconds": 0.211058917
+  },
+  {
+    "core_percent": 12.784620825000001,
+    "first_nonfinite_seconds": null,
+    "name": "quality-female-phrase-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 3,
+    "seconds": 0.511384833
+  },
+  {
+    "core_percent": 12.609728125,
+    "first_nonfinite_seconds": null,
+    "name": "quality-female-phrase-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 4,
+    "seconds": 0.504389125
+  },
+  {
+    "core_percent": 5.27804585,
+    "first_nonfinite_seconds": 0.25377083333333333,
+    "name": "quality-female-phrase-os1",
+    "nonfinite": 179819,
+    "os": 1,
+    "rep": 4,
+    "seconds": 0.211121834
+  },
+  {
+    "core_percent": 12.951539575000002,
+    "first_nonfinite_seconds": null,
+    "name": "quality-female-vowel-i-u-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 0,
+    "seconds": 0.518061583
+  },
+  {
+    "core_percent": 5.616825,
+    "first_nonfinite_seconds": 0.023041666666666665,
+    "name": "quality-female-vowel-i-u-os1",
+    "nonfinite": 190894,
+    "os": 1,
+    "rep": 0,
+    "seconds": 0.224673
+  },
+  {
+    "core_percent": 5.63531355,
+    "first_nonfinite_seconds": 0.023041666666666665,
+    "name": "quality-female-vowel-i-u-os1",
+    "nonfinite": 190894,
+    "os": 1,
+    "rep": 1,
+    "seconds": 0.225412542
+  },
+  {
+    "core_percent": 12.866630225,
+    "first_nonfinite_seconds": null,
+    "name": "quality-female-vowel-i-u-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 1,
+    "seconds": 0.514665209
+  },
+  {
+    "core_percent": 12.983072925,
+    "first_nonfinite_seconds": null,
+    "name": "quality-female-vowel-i-u-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 2,
+    "seconds": 0.519322917
+  },
+  {
+    "core_percent": 5.564329175,
+    "first_nonfinite_seconds": 0.023041666666666665,
+    "name": "quality-female-vowel-i-u-os1",
+    "nonfinite": 190894,
+    "os": 1,
+    "rep": 2,
+    "seconds": 0.222573167
+  },
+  {
+    "core_percent": 5.70523855,
+    "first_nonfinite_seconds": 0.023041666666666665,
+    "name": "quality-female-vowel-i-u-os1",
+    "nonfinite": 190894,
+    "os": 1,
+    "rep": 3,
+    "seconds": 0.228209542
+  },
+  {
+    "core_percent": 12.930879175000001,
+    "first_nonfinite_seconds": null,
+    "name": "quality-female-vowel-i-u-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 3,
+    "seconds": 0.517235167
+  },
+  {
+    "core_percent": 12.9325521,
+    "first_nonfinite_seconds": null,
+    "name": "quality-female-vowel-i-u-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 4,
+    "seconds": 0.517302084
+  },
+  {
+    "core_percent": 5.60471145,
+    "first_nonfinite_seconds": 0.023041666666666665,
+    "name": "quality-female-vowel-i-u-os1",
+    "nonfinite": 190894,
+    "os": 1,
+    "rep": 4,
+    "seconds": 0.224188458
+  },
+  {
+    "core_percent": 13.446987499999999,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-phrase-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 0,
+    "seconds": 0.5378795
+  },
+  {
+    "core_percent": 5.726286475,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-phrase-os1",
+    "nonfinite": 0,
+    "os": 1,
+    "rep": 0,
+    "seconds": 0.229051459
+  },
+  {
+    "core_percent": 5.77902915,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-phrase-os1",
+    "nonfinite": 0,
+    "os": 1,
+    "rep": 1,
+    "seconds": 0.231161166
+  },
+  {
+    "core_percent": 13.421719800000002,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-phrase-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 1,
+    "seconds": 0.536868792
+  },
+  {
+    "core_percent": 13.548622925,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-phrase-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 2,
+    "seconds": 0.541944917
+  },
+  {
+    "core_percent": 5.7221135499999995,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-phrase-os1",
+    "nonfinite": 0,
+    "os": 1,
+    "rep": 2,
+    "seconds": 0.228884542
+  },
+  {
+    "core_percent": 5.75973125,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-phrase-os1",
+    "nonfinite": 0,
+    "os": 1,
+    "rep": 3,
+    "seconds": 0.23038925
+  },
+  {
+    "core_percent": 13.549604174999999,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-phrase-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 3,
+    "seconds": 0.541984167
+  },
+  {
+    "core_percent": 13.414771875000001,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-phrase-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 4,
+    "seconds": 0.536590875
+  },
+  {
+    "core_percent": 5.748520825,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-phrase-os1",
+    "nonfinite": 0,
+    "os": 1,
+    "rep": 4,
+    "seconds": 0.229940833
+  },
+  {
+    "core_percent": 13.767501025000001,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-vowel-i-u-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 0,
+    "seconds": 0.550700041
+  },
+  {
+    "core_percent": 6.0244948,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-vowel-i-u-os1",
+    "nonfinite": 0,
+    "os": 1,
+    "rep": 0,
+    "seconds": 0.240979792
+  },
+  {
+    "core_percent": 6.044760425,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-vowel-i-u-os1",
+    "nonfinite": 0,
+    "os": 1,
+    "rep": 1,
+    "seconds": 0.241790417
+  },
+  {
+    "core_percent": 13.76076355,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-vowel-i-u-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 1,
+    "seconds": 0.550430542
+  },
+  {
+    "core_percent": 13.721058325,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-vowel-i-u-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 2,
+    "seconds": 0.548842333
+  },
+  {
+    "core_percent": 6.1279770749999996,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-vowel-i-u-os1",
+    "nonfinite": 0,
+    "os": 1,
+    "rep": 2,
+    "seconds": 0.245119083
+  },
+  {
+    "core_percent": 6.023618750000001,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-vowel-i-u-os1",
+    "nonfinite": 0,
+    "os": 1,
+    "rep": 3,
+    "seconds": 0.24094475
+  },
+  {
+    "core_percent": 13.689652075,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-vowel-i-u-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 3,
+    "seconds": 0.547586083
+  },
+  {
+    "core_percent": 13.729263524999999,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-vowel-i-u-os2",
+    "nonfinite": 0,
+    "os": 2,
+    "rep": 4,
+    "seconds": 0.549170541
+  },
+  {
+    "core_percent": 6.00524375,
+    "first_nonfinite_seconds": null,
+    "name": "quality-male-vowel-i-u-os1",
+    "nonfinite": 0,
+    "os": 1,
+    "rep": 4,
+    "seconds": 0.24020975
+  }
+]

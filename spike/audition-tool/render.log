@@ -1,0 +1,58 @@
+$ cargo build --release -p chimera-cli
+    Finished `release` profile [optimized] target(s) in 0.01s
+$ cargo run --release --locked --manifest-path /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/Cargo.toml -- /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw
+    Finished `release` profile [optimized] target(s) in 0.00s
+     Running `/Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/target/release/chimera-audition-tool /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw`
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render speech /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_pa-male 'pɑ' male --float
+wrote /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_pa-male.wav  0.98 s  peak 0.196
+p@0.110 ɑ@0.195
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render speech /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_ta-male 'tɑ' male --float
+wrote /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_ta-male.wav  0.97 s  peak 0.191
+t@0.110 ɑ@0.185
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render speech /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_ka-male 'kɑ' male --float
+wrote /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_ka-male.wav  0.98 s  peak 0.192
+k@0.110 ɑ@0.190
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render speech /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_ba-male 'bɑ' male --float
+wrote /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_ba-male.wav  0.98 s  peak 0.197
+b@0.110 ɑ@0.195
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render speech /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_ma-male 'mɑ' male --float
+wrote /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_ma-male.wav  0.97 s  peak 0.193
+m@0.110 ɑ@0.180
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render speech /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_na-male 'nɑ' male --float
+wrote /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_na-male.wav  0.96 s  peak 0.197
+n@0.110 ɑ@0.170
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render speech /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_sa-male 'sɑ' male --float
+wrote /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_sa-male.wav  1.00 s  peak 0.203
+s@0.110 ɑ@0.215
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render speech /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_sha-male 'ʃɑ' male --float
+wrote /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_sha-male.wav  1.00 s  peak 0.210
+ʃ@0.110 ɑ@0.215
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render speech /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_fa-male 'fɑ' male --float
+wrote /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/03_fa-male.wav  1.00 s  peak 0.194
+f@0.110 ɑ@0.210
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render text /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/04_text-hello-world-male 'Hello world.' male --float
+həlˈoʊwˈɝɫd
+wrote /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/04_text-hello-world-male.wav  1.21 s, rendered in 166 ms
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render notes /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/notes.json /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/05_sung-la-la-la-g3-a3-c4 male --float
+/Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/05_sung-la-la-la-g3-a3-c4.wav: 2.70 s, peak 0.750, 3 notes
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render beatbox /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/beatbox 'B t Pf t B t Pf t' male 100 2 --float
+B    Kick          onset   -0.4 ms  peak 0.169  set-up -29.4 dB  tail -21.7 dB  lead-in 137 ms
+t    Hi-hat        onset   -0.3 ms  peak 0.103  set-up -9.0 dB  tail -14.3 dB  lead-in 106 ms
+tss  Open hat      onset   -0.3 ms  peak 0.100  set-up -8.7 dB  tail -2.7 dB  lead-in 106 ms
+Pf   Snare         onset  -11.1 ms  peak 0.245  set-up -32.7 dB  tail -7.7 dB  lead-in 130 ms
+K    Rimshot       onset   -2.8 ms  peak 0.237  set-up -12.4 dB  tail -24.7 dB  lead-in 118 ms
+^K   Inward snare  onset   -6.6 ms  peak 0.100  set-up -4.5 dB  tail -11.6 dB  lead-in 100 ms
+!    Tongue click  onset   -1.6 ms  peak 0.595  set-up -19.2 dB  tail -40.6 dB  lead-in 174 ms
+P!   Lip pop       onset   -0.4 ms  peak 0.083  set-up -14.4 dB  tail -16.5 dB  lead-in 173 ms
+kch  Crash         onset   -6.8 ms  peak 0.075  set-up -2.3 dB  tail -0.2 dB  lead-in 101 ms
+m    Hum           onset    4.6 ms  peak 0.093  set-up -32.5 dB  tail 0.4 dB  lead-in 106 ms
+pattern "pattern": 2.90 s, peak 0.188 -> /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/beatbox/pattern.wav
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render creature songbird /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/creatures --float
+Songbird: 7.2 s in 773 ms (10.8% RT, internal 192000 Hz)  peak 0.601  non-finite 0
+  target 2600 Hz, measured 2609.8 Hz (aperiodicity 0.04)
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render creature seal /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/creatures --float
+Weddell seal: 9.6 s in 1825 ms (19.0% RT, internal 96000 Hz)  peak 0.519  non-finite 0
+  target 900 Hz, measured 897.4 Hz (aperiodicity 0.01)
+$ /Users/robschoen/Dropbox/CC/Chimera/upstream/target/release/chimera render creature alligator /Users/robschoen/Dropbox/CC/Chimera/spike/audition-tool/raw/creatures --float
+American alligator: 9.2 s in 2413 ms (26.2% RT, internal 96000 Hz)  peak 0.827  non-finite 0
+  target 28 Hz, measured 27.1 Hz (aperiodicity 0.13)

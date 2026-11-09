@@ -1,0 +1,11 @@
+[package]
+name = "rack-bench"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chimera = { path = "../../upstream/crates/chimera" }
+
+[profile.release]
+debug = true
+panic = "abort"
