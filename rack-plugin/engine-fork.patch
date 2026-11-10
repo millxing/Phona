@@ -1,0 +1,109 @@
+diff --git a/crates/chimera/src/sources/glottis.rs b/crates/chimera/src/sources/glottis.rs
+index 83ce8e5..bffa4fe 100644
+--- a/crates/chimera/src/sources/glottis.rs
++++ b/crates/chimera/src/sources/glottis.rs
+@@ -72,6 +72,10 @@ pub const DEFAULT_GLOTTIS: GlottisParams = GlottisParams {
+ pub struct ParametricGlottis {
+     pub fs: f64,
+     pub params: GlottisParams,
++    /// How far fry pulls the rate toward 48 Hz (0..1). `None` (the default) follows `params.fry`,
++    /// which ties the creak's pulse shape to a pitch drop; a host that wants a tuned fry sets this
++    /// apart from `params.fry`.
++    pub fry_pull: Option<f64>,
+     phase: f64,
+     cycle_amp: f64,
+     cycle_period_scale: f64,
+@@ -109,6 +113,7 @@ impl ParametricGlottis {
+         ParametricGlottis {
+             fs,
+             params: DEFAULT_GLOTTIS,
++            fry_pull: None,
+             phase: 0.0,
+             cycle_amp: 1.0,
+             cycle_period_scale: 1.0,
+@@ -163,8 +168,12 @@ impl ParametricGlottis {
+         }
+         let mut f0 = p.f0 * self.pitch_factor;
+         // fry pulls the rate down toward ~45 Hz
+-        if p.fry > 0.0 {
+-            f0 = f0 * (1.0 - p.fry) + js_min(f0, 48.0) * p.fry;
++        let pull = match self.fry_pull {
++            Some(x) => x,
++            None => p.fry,
++        };
++        if pull > 0.0 {
++            f0 = f0 * (1.0 - pull) + js_min(f0, 48.0) * pull;
+         }
+         self.f0_now = f0;
+ 
+diff --git a/crates/chimera/src/voice/human_voice.rs b/crates/chimera/src/voice/human_voice.rs
+index 9092506..e9c3c31 100644
+--- a/crates/chimera/src/voice/human_voice.rs
++++ b/crates/chimera/src/voice/human_voice.rs
+@@ -196,6 +196,16 @@ pub struct HumanVoice {
+     lim_release: f64,
+     /// tissue may compress this far (cm) before the palate stops the articulator
+     pub max_penetration: f64,
++    /// Output limiter on (the default). Off, the output is the raw radiated signal after the DC
++    /// blocker, with its true dynamics: the host must leave headroom and guard its own output.
++    pub limiter: bool,
++    /// External excitation: a volume velocity (cm³/s) injected just above the glottis on every
++    /// internal step, so an outside sound is filtered by the tract as the glottal flow is (a talk
++    /// box). The host sets it before each `render` call (it is held, not cleared). 0 = none.
++    pub ext_in: f64,
++    /// Scales the vibrating fold area (1 = normal). 0 leaves only the static leak (abduction and
++    /// chink), so the folds are silent and an external excitation can take their place.
++    pub fold_scale: f64,
+ }
+ 
+ impl HumanVoice {
+@@ -250,6 +260,9 @@ impl HumanVoice {
+             lim_hold_n: crate::math::js_round(0.025 * fs_out) as i64,
+             lim_release: exp(-1.0 / (0.2 * fs_out)),
+             max_penetration: 0.1,
++            limiter: true,
++            ext_in: 0.0,
++            fold_scale: 1.0,
+         };
+         let x = v.artic.x;
+         v.airway.apply(&x, 0.0);
+@@ -309,7 +322,7 @@ impl HumanVoice {
+         let s = self.source;
+         let g = &mut self.glottis.params;
+         let k2 = self.airway.body.scale * self.airway.body.scale;
+-        g.amplitude = 0.17 * k2 * (if s.voiced { 1.0 } else { 0.0 });
++        g.amplitude = 0.17 * k2 * (if s.voiced { 1.0 } else { 0.0 }) * self.fold_scale;
+         g.abduction = (if s.voiced { 0.1 * s.breathiness * s.breathiness } else { 0.2 + 0.1 * s.breathiness }) * k2;
+         self.base_abduction = g.abduction;
+         self.base_closure = 0.0;
+@@ -362,6 +375,9 @@ impl HumanVoice {
+                 net.set_fixed_pressure(lungs, self.p_lung_now);
+                 let a = self.glottis.next(net.p[sub_node] - net.p[supra]);
+                 net.set_port_area(gp, a);
++                if self.ext_in != 0.0 {
++                    net.ext_flow[supra] += self.ext_in;
++                }
+                 let y = net.step();
+                 if self.dec.push(y) {
+                     // output sample
+@@ -383,12 +399,14 @@ impl HumanVoice {
+                     } else {
+                         self.lim_env *= self.lim_release;
+                     }
+-                    if self.lim_env > 0.75 {
+-                        v *= 0.75 / self.lim_env;
+-                    }
+-                    let al = v.abs();
+-                    if al > 0.85 {
+-                        v = js_sign(v) * (0.85 + 0.15 * tanh((al - 0.85) / 0.15));
++                    if self.limiter {
++                        if self.lim_env > 0.75 {
++                            v *= 0.75 / self.lim_env;
++                        }
++                        let al = v.abs();
++                        if al > 0.85 {
++                            v = js_sign(v) * (0.85 + 0.15 * tanh((al - 0.85) / 0.15));
++                        }
+                     }
+                     *o = v as f32;
+                     self.out_acc += v * v;

@@ -16,3 +16,6 @@ target/
 *.wav
 *.f32
 __pycache__/
+
+# Engine fork: local clone of upstream on branch `rack`; its changes are kept in rack-plugin/engine-fork.patch
+/engine/

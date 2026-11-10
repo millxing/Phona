@@ -9,7 +9,7 @@ publish = false
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-chimera = { path = "../../upstream/crates/chimera" }
+chimera = { path = "../../engine/crates/chimera" }
 
 [profile.release]
 opt-level = 3
