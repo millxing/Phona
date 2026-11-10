@@ -282,6 +282,7 @@ pub extern "C" fn chim_new(sample_rate: f64, female: f64, child: f64) -> *mut Ch
         let vowels = VOWELS.map(|v| vowel_artic(v, body).unwrap_or_default());
         let velum_max = velum_table(fs, body, &vowels);
         engine.voice_mut().airway.tract.velum_junction = true; // the nose stays reachable behind a lowered velum
+        engine.voice_mut().artic.settle = true; // a held vowel then skips the geometry (CPU)
         engine.voice_mut().limiter = false; // true dynamics; `soft_clip` guards the output
         engine.set_artic(&vowels[2], Some(true));
         // Warm up off the audio thread: the first control tick lazily allocates the airway's

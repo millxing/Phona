@@ -1,5 +1,359 @@
+diff --git a/crates/chimera/src/airway/network.rs b/crates/chimera/src/airway/network.rs
+index 455989e..1ba3660 100644
+--- a/crates/chimera/src/airway/network.rs
++++ b/crates/chimera/src/airway/network.rs
+@@ -259,6 +259,13 @@ pub struct AirwayNetwork {
+     half_l: Vec<f64>,
+     half_r: Vec<f64>,
+     sqrt_a: Vec<f64>,
++    /// The (area, minimum, Δ) each node's `inv_a`, `inv_amin`, `sqrt_a`, `half_l`, `half_r` were
++    /// last computed from. A node whose geometry stands still (the trachea and the nose always,
++    /// the mouth while a vowel is held) keeps them: two divisions and a square root less per node
++    /// per sample. Same inputs, same results: bit-identical. NaN = not computed yet.
++    geo_a: Vec<f64>,
++    geo_am: Vec<f64>,
++    geo_d: Vec<f64>,
+     flow_sum: Vec<f64>,
+     /// external volume-velocity injection per node for the next step (cleared after use)
+     pub ext_flow: Vec<f64>,
+@@ -371,6 +378,9 @@ impl AirwayNetwork {
+             half_l: Vec::new(),
+             half_r: Vec::new(),
+             sqrt_a: Vec::new(),
++            geo_a: Vec::new(),
++            geo_am: Vec::new(),
++            geo_d: Vec::new(),
+             flow_sum: Vec::new(),
+             ext_flow: Vec::new(),
+             fixed: Vec::new(),
+@@ -511,6 +521,9 @@ impl AirwayNetwork {
+         self.wall_r = zf(n);
+         self.wall_k = zf(n);
+         self.wall_perim = zf(n);
++        self.geo_a = vec![f64::NAN; n];
++        self.geo_am = vec![f64::NAN; n];
++        self.geo_d = vec![f64::NAN; n];
+         self.wall_rad = zf(n);
+         self.has_wall = vec![false; n];
+         self.wall_y = zf(n);
+@@ -781,57 +794,87 @@ impl AirwayNetwork {
+         //    the split keeps mass conserved.
+         let sq = self.squeeze_area;
+         let vol_on = self.enable_volume_source;
+-        if vol_on {
+-            self.spill.fill(0.0);
+-        }
++        // Every array this function touches is borrowed once per section, as a slice of known
++        // length. Indexing `self.x[k]` instead reloads the Vec's pointer and length on each use
++        // (a store through one array could, for all the compiler knows, change another's header):
++        // that was about half of this function's time. Same operations, bit-identical output.
+         {
+-            let area = &mut self.area;
+-            let amin = &mut self.amin;
+-            let dx = &mut self.dx;
+-            let inj = &mut self.spill; // the per-node raw injection accumulator
++        let area_step = &self.area_step[..n];
++        let amin_step = &self.amin_step[..n];
++        let dx_step = &self.dx_step[..n];
++        let inv_a = &mut self.inv_a[..n];
++        let inv_amin = &mut self.inv_amin[..n];
++        let sqrt_a = &mut self.sqrt_a[..n];
++        let half_l = &mut self.half_l[..n];
++        let half_r = &mut self.half_r[..n];
++        let wall_perim = &self.wall_perim[..n];
++        let visc_f = &self.visc_f[..n];
++        let vol = &mut self.vol[..n];
++        let amin_target = &self.amin_target[..n];
++        let inv_lsum = &mut self.inv_lsum[..n];
++        let flow_sum = &mut self.flow_sum[..n];
++        let ext_flow = &mut self.ext_flow[..n];
++        let vol_src1 = &mut self.vol_src1[..n];
++        let vol_src2 = &mut self.vol_src2[..n];
++        let area = &mut self.area[..n];
++        let amin = &mut self.amin[..n];
++        let dx = &mut self.dx[..n];
++        let nbr_start = &self.nbr_start[..];
++        let nbr_list = &self.nbr_list[..];
++        let inj = &mut self.spill[..n]; // the per-node raw injection accumulator
++        let (geo_a, geo_am, geo_d) = (&mut self.geo_a[..n], &mut self.geo_am[..n], &mut self.geo_d[..n]);
++        {
++            if vol_on {
++                inj.fill(0.0);
++            }
+             for k in 0..n {
+-                let mut a = area[k] + self.area_step[k];
++                let mut a = area[k] + area_step[k];
+                 if a < 0.0 {
+                     a = 0.0;
+                 }
+                 area[k] = a;
+-                let mut am = amin[k] + self.amin_step[k];
++                let mut am = amin[k] + amin_step[k];
+                 if am < 0.0 {
+                     am = 0.0;
+                 }
+                 let amk = if am > a { a } else { am };
+                 amin[k] = amk;
+-                dx[k] += self.dx_step[k];
++                dx[k] += dx_step[k];
+                 let d = dx[k];
+-                let ia = 1.0 / (if a > 1e-6 { a } else { 1e-6 });
+-                self.inv_a[k] = ia;
+-                self.inv_amin[k] = 1.0 / (if amk > 1e-6 { amk } else { 1e-6 });
+-                let sa = sqrt(a);
+-                self.sqrt_a[k] = sa;
+-                self.half_l[k] = d * ia;
+-                self.half_r[k] = self.wall_perim[k] * d * sa * ia * ia * self.visc_f[k];
++                if a != geo_a[k] || amk != geo_am[k] || d != geo_d[k] {
++                    geo_a[k] = a;
++                    geo_am[k] = amk;
++                    geo_d[k] = d;
++                    let ia = 1.0 / (if a > 1e-6 { a } else { 1e-6 });
++                    inv_a[k] = ia;
++                    inv_amin[k] = 1.0 / (if amk > 1e-6 { amk } else { 1e-6 });
++                    let sa = sqrt(a);
++                    sqrt_a[k] = sa;
++                    half_l[k] = d * ia;
++                    half_r[k] = wall_perim[k] * d * sa * ia * ia * visc_f[k];
++                }
+                 let v = (if a > min_a { a } else { min_a }) * d;
+                 if vol_on {
+-                    let raw = -(v - self.vol[k]) * inv_t;
++                    let raw = -(v - vol[k]) * inv_t;
+                     let ae = if amin[k] < a { amin[k] } else { a }; // a node sealed at its minimum cannot hold air either
+                     if raw != 0.0 && ae < sq {
+                         let tt = ae / sq;
+                         let keep = tt * tt * (3.0 - 2.0 * tt);
+                         inj[k] += raw * keep;
+                         let sp = raw * (1.0 - keep);
+-                        let (s0, s1) = (self.nbr_start[k], self.nbr_start[k + 1]);
++                        let (s0, s1) = (nbr_start[k], nbr_start[k + 1]);
+                         let mut n_open = 0usize;
+                         for e in s0..s1 {
+-                            let m = self.nbr_list[e];
+-                            if js_min(area[m], amin[m]) >= sq || self.amin_target[m] >= sq {
++                            let m = nbr_list[e];
++                            if js_min(area[m], amin[m]) >= sq || amin_target[m] >= sq {
+                                 n_open += 1;
+                             }
+                         }
+                         if n_open > 0 {
+                             let share = sp / n_open as f64;
+                             for e in s0..s1 {
+-                                let m = self.nbr_list[e];
+-                                if js_min(area[m], amin[m]) >= sq || self.amin_target[m] >= sq {
++                                let m = nbr_list[e];
++                                if js_min(area[m], amin[m]) >= sq || amin_target[m] >= sq {
+                                     inj[m] += share;
+                                 }
+                             }
+@@ -840,22 +883,23 @@ impl AirwayNetwork {
+                         inj[k] += raw;
+                     }
+                 }
+-                self.vol[k] = v;
+-                self.inv_lsum[k] = 0.0;
+-                self.flow_sum[k] = self.ext_flow[k];
+-                self.ext_flow[k] = 0.0;
++                vol[k] = v;
++                inv_lsum[k] = 0.0;
++                flow_sum[k] = ext_flow[k];
++                ext_flow[k] = 0.0;
+             }
+         }
+         if vol_on {
+             let c = self.vol_lp_coef;
+             for k in 0..n {
+-                self.vol_src1[k] += c * (self.spill[k] - self.vol_src1[k]);
+-                let s1 = self.vol_src1[k];
+-                self.vol_src2[k] += c * (s1 - self.vol_src2[k]);
+-                self.flow_sum[k] += self.vol_src2[k];
++                vol_src1[k] += c * (inj[k] - vol_src1[k]);
++                let s1 = vol_src1[k];
++                vol_src2[k] += c * (s1 - vol_src2[k]);
++                flow_sum[k] += vol_src2[k];
+             }
+         }
+ 
++        }
+         // 2) turbulence noise → series pressure sources
+         self.psrc.fill(0.0);
+         if !self.noise.is_empty() {
+@@ -992,102 +1036,132 @@ impl AirwayNetwork {
+             }
+         }
+ 
++        let junction_floor = self.enable_junction_floor;
++        let rad_total;
++        {
++        let has_wall = &self.has_wall[..n];
++        let wall_m = &self.wall_m[..n];
++        let wall_r = &self.wall_r[..n];
++        let wall_v = &mut self.wall_v[..n];
++        let p = &mut self.p[..n];
++        let wall_k = &self.wall_k[..n];
++        let wall_y = &mut self.wall_y[..n];
++        let area = &self.area[..n];
++        let sqrt_a = &self.sqrt_a[..n];
++        let wall_perim = &self.wall_perim[..n];
++        let dx = &self.dx[..n];
++        let wall_u = &mut self.wall_u[..n];
++        let flow_sum = &mut self.flow_sum[..n];
++        let wall_rad = &self.wall_rad[..n];
++        let fixed = &self.fixed[..n];
++        let amin = &self.amin[..n];
++        let rad_of = &self.rad_of[..n];
++        let vol = &self.vol[..n];
++        let is_junction = &self.is_junction[..n];
++        let inv_lsum = &self.inv_lsum[..n];
++        let nbr_start = &self.nbr_start[..];
++        let nbr_list = &self.nbr_list[..];
++        let rad_ul = &mut self.rad_ul[..];
++        let rad_u = &mut self.rad_u[..];
++        let rad_l_prev = &mut self.rad_l_prev[..];
+         // 4) walls (velocity at half step from p(n), displacement integrates)
+         let mut wall_rad_sum = 0.0;
+         for k in 0..n {
+-            if !self.has_wall[k] {
++            if !has_wall[k] {
+                 continue;
+             }
+-            let m = self.wall_m[k];
+-            let r = self.wall_r[k];
+-            let v = ((m * inv_t - 0.5 * r) * self.wall_v[k] + self.p[k] - self.wall_k[k] * self.wall_y[k]) / (m * inv_t + 0.5 * r);
+-            self.wall_v[k] = v;
+-            self.wall_y[k] += t * v;
+-            let sa = if self.area[k] > min_a { self.sqrt_a[k] } else { sqrt(min_a) };
+-            let uw = self.wall_perim[k] * sa * self.dx[k] * v;
+-            self.wall_u[k] = uw;
+-            self.flow_sum[k] -= uw;
+-            wall_rad_sum += uw * self.wall_rad[k];
++            let m = wall_m[k];
++            let r = wall_r[k];
++            let v = ((m * inv_t - 0.5 * r) * wall_v[k] + p[k] - wall_k[k] * wall_y[k]) / (m * inv_t + 0.5 * r);
++            wall_v[k] = v;
++            wall_y[k] += t * v;
++            let sa = if area[k] > min_a { sqrt_a[k] } else { sqrt(min_a) };
++            let uw = wall_perim[k] * sa * dx[k] * v;
++            wall_u[k] = uw;
++            flow_sum[k] -= uw;
++            wall_rad_sum += uw * wall_rad[k];
+         }
+ 
+         // 5) nodes (radiation loads handled semi-implicitly)
+         let t2 = t * t;
+-        let mut rad_total = wall_rad_sum;
+-        let cl = self.closed_area;
++        let mut rad_acc = wall_rad_sum;
++        let cl = closed;
+         for k in 0..n {
+-            if self.fixed[k] {
++            if fixed[k] {
+                 continue;
+             }
+             // sealed if the cell itself, or its narrowest point, is closed (then all its series
+             // branches are closed too, and compressing its remaining volume would trap pressure)
+-            if self.area[k] < cl || self.amin[k] < cl {
+-                let rr = self.rad_of[k];
++            if area[k] < cl || amin[k] < cl {
++                let rr = rad_of[k];
+                 if rr >= 0 {
+                     // sealed aperture: its outer face is the atmosphere, so it relaxes to 0 (tracking the
+                     // pressurised cavity behind would discharge as a radiated spike on reopening)
+-                    self.p[k] *= 0.98;
++                    p[k] *= 0.98;
+                 } else {
+                     // sealed interior cell (tissue contact): no air of its own; follow open neighbours
+                     let mut sum = 0.0;
+                     let mut cnt = 0usize;
+-                    for e in self.nbr_start[k]..self.nbr_start[k + 1] {
+-                        let m = self.nbr_list[e];
+-                        if self.area[m] >= cl && self.amin[m] >= cl {
+-                            sum += self.p[m];
++                    for e in nbr_start[k]..nbr_start[k + 1] {
++                        let m = nbr_list[e];
++                        if area[m] >= cl && amin[m] >= cl {
++                            sum += p[m];
+                             cnt += 1;
+                         }
+                     }
+                     if cnt > 0 {
+-                        self.p[k] += 0.02 * (sum / cnt as f64 - self.p[k]);
++                        p[k] += 0.02 * (sum / cnt as f64 - p[k]);
+                     }
+                 }
+                 if rr >= 0 {
+                     let rr = rr as usize;
+                     // sealed aperture: let the radiated flow die away smoothly (no derivative step)
+-                    self.rad_ul[rr] *= 0.995;
+-                    self.rad_u[rr] = self.rad_ul[rr];
+-                    rad_total += self.rad_ul[rr];
++                    rad_ul[rr] *= 0.995;
++                    rad_u[rr] = rad_ul[rr];
++                    rad_acc += rad_ul[rr];
+                 }
+                 continue;
+             }
+-            let mut c = self.vol[k] / RHO_C2;
++            let mut c = vol[k] / RHO_C2;
+             // junction stability: local breathing mode ω² ≈ ΣL⁻¹/C must satisfy T²ω² ≤ 2.4
+-            if self.is_junction[k] && self.enable_junction_floor {
+-                let c_min = (t2 * self.inv_lsum[k]) / 2.4;
++            if is_junction[k] && junction_floor {
++                let c_min = (t2 * inv_lsum[k]) / 2.4;
+                 if c < c_min {
+                     c = c_min;
+                 }
+             }
+-            let r = self.rad_of[k];
++            let r = rad_of[k];
+             if r < 0 {
+-                self.p[k] += (t / c) * self.flow_sum[k];
++                p[k] += (t / c) * flow_sum[k];
+             } else {
+                 let r = r as usize;
+-                let a = if self.area[k] > 1e-4 { self.area[k] } else { 1e-4 };
++                let a = if area[k] > 1e-4 { area[k] } else { 1e-4 };
+                 let lr = (8.0 * RHO) / (3.0 * PI * sqrt(PI * a));
+                 let rr = (128.0 * RHO * C_SOUND) / (9.0 * PI * PI * a);
+-                let p_old = self.p[k];
++                let p_old = p[k];
+                 // energy-safe: when the radiation inertance grows (aperture closing) conserve momentum
+-                let lp = self.rad_l_prev[r];
+-                let mut ul_prev = self.rad_ul[r];
++                let lp = rad_l_prev[r];
++                let mut ul_prev = rad_ul[r];
+                 if lp > 0.0 && lr > lp {
+                     ul_prev *= lp / lr;
+                 }
+-                self.rad_l_prev[r] = lr;
++                rad_l_prev[r] = lr;
+                 // Crank–Nicolson coupling of the node and its parallel R–L load (A-stable, energy-
+                 // conserving for the reactive part): Lr ∝ A^-½ against C ∝ A makes the explicit form
+                 // unstable at small apertures. U_L lives at integer steps; the node sees its mean.
+                 let h = t / (2.0 * lr);
+                 let g = 0.5 / rr;
+-                let p_new = (p_old * (c * inv_t - 0.5 * h - g) + self.flow_sum[k] - ul_prev) / (c * inv_t + 0.5 * h + g);
+-                self.p[k] = p_new;
++                let p_new = (p_old * (c * inv_t - 0.5 * h - g) + flow_sum[k] - ul_prev) / (c * inv_t + 0.5 * h + g);
++                p[k] = p_new;
+                 let ul = ul_prev + h * (p_old + p_new);
+-                self.rad_ul[r] = ul;
++                rad_ul[r] = ul;
+                 let ur = 0.5 * (ul_prev + ul) + g * (p_new + p_old);
+-                self.rad_u[r] = ur;
+-                rad_total += ur;
++                rad_u[r] = ur;
++                rad_acc += ur;
+             }
+         }
++        rad_total = rad_acc;
++        }
+         let out = (rad_total - self.rad_prev_total) * inv_t;
+         self.rad_prev_total = rad_total;
+         self.out = out;
 diff --git a/crates/chimera/src/anatomy/human.rs b/crates/chimera/src/anatomy/human.rs
-index 62b7d26..aecd05c 100644
+index 62b7d26..e64bc7e 100644
 --- a/crates/chimera/src/anatomy/human.rs
 +++ b/crates/chimera/src/anatomy/human.rs
 @@ -638,6 +638,17 @@ pub struct HumanVocalTract {
@@ -84,6 +438,60 @@ index 62b7d26..aecd05c 100644
          f.length = f.lip_s;
          f.lip_area = grid[last].area;
  
+@@ -1414,7 +1454,14 @@ fn project_on(pl: &Polyline, cum: &[f64], px: f64, py: f64) -> Projection {
+             t
+         };
+         let (qx, qy) = (ax + ex * t, ay + ey * t);
+-        let d = hypot(px - qx, py - qy);
++        // `hypot` is the costly step and most segments are nowhere near the closest: skip those
++        // whose squared distance is clearly beyond the best so far (the margin is far wider than
++        // any rounding, so every segment that could win or tie still takes the exact test).
++        let (ddx, ddy) = (px - qx, py - qy);
++        if ddx * ddx + ddy * ddy > best * best * 1.000001 {
++            continue;
++        }
++        let d = hypot(ddx, ddy);
+         if d < best {
+             best = d;
+             bs = cum[i] + t * sqrt(l2);
+diff --git a/crates/chimera/src/control/articulators.rs b/crates/chimera/src/control/articulators.rs
+index 8a41a99..72941b5 100644
+--- a/crates/chimera/src/control/articulators.rs
++++ b/crates/chimera/src/control/articulators.rs
+@@ -67,6 +67,12 @@ pub struct ArticulatorBank {
+     omega: [f64; N_ARTIC],
+     /// effective targets used in the last step (base blended with gestures), for telemetry
+     pub effective: HumanArtic,
++    /// Let an articulator come to rest exactly on its target once it is within a nanometre of it
++    /// and all but still (off by default). The spring otherwise creeps toward the target for
++    /// ever in the last bits, so the articulators never compare equal from one control step to
++    /// the next and the airway recomputes a geometry that has not changed (see
++    /// `HumanAirway::commit`). Changes the output in the last bits only, hence a switch.
++    pub settle: bool,
+ }
+ 
+ impl Default for ArticulatorBank {
+@@ -77,7 +83,7 @@ impl Default for ArticulatorBank {
+ 
+ impl ArticulatorBank {
+     pub fn new() -> Self {
+-        let mut b = ArticulatorBank { x: NEUTRAL, v: [0.0; N_ARTIC], target: NEUTRAL, tip_free: true, speed: [1.0; N_ARTIC], omega: ARTIC_SPECS.map(|s| 2.0 * PI * s.hz), effective: NEUTRAL };
++        let mut b = ArticulatorBank { x: NEUTRAL, v: [0.0; N_ARTIC], target: NEUTRAL, tip_free: true, speed: [1.0; N_ARTIC], omega: ARTIC_SPECS.map(|s| 2.0 * PI * s.hz), effective: NEUTRAL, settle: false };
+         let tip = rest_tip(NEUTRAL.jaw, NEUTRAL.tb_x, NEUTRAL.tb_y);
+         b.x.tt_x = tip.x;
+         b.target.tt_x = tip.x;
+@@ -143,6 +149,11 @@ impl ArticulatorBank {
+             let x = self.x.get(k);
+             let acc = w * w * (tgt - x) - 2.0 * w * self.v[i];
+             self.v[i] += acc * dt;
++            if self.settle && (tgt - x).abs() < 1e-7 && self.v[i].abs() < 1e-6 {
++                self.v[i] = 0.0;
++                self.x.set(k, tgt);
++                continue;
++            }
+             self.x.set(k, x + self.v[i] * dt);
+         }
+     }
 diff --git a/crates/chimera/src/sources/glottis.rs b/crates/chimera/src/sources/glottis.rs
 index 83ce8e5..bffa4fe 100644
 --- a/crates/chimera/src/sources/glottis.rs
@@ -122,6 +530,44 @@ index 83ce8e5..bffa4fe 100644
          }
          self.f0_now = f0;
  
+diff --git a/crates/chimera/src/voice/human_airway.rs b/crates/chimera/src/voice/human_airway.rs
+index 0b3fbc9..e308997 100644
+--- a/crates/chimera/src/voice/human_airway.rs
++++ b/crates/chimera/src/voice/human_airway.rs
+@@ -62,6 +62,8 @@ pub struct HumanAirway {
+     base_dt: f64,
+     noise_list: Vec<NoiseSpec>,
+     scratch_frame: HumanFrame,
++    /// what `frame` was computed from: the articulators and the tract's settings
++    frame_key: Option<(HumanArtic, bool, crate::anatomy::human::AreaLaw)>,
+ }
+ 
+ impl HumanAirway {
+@@ -150,6 +152,7 @@ impl HumanAirway {
+             base_dt: 0.0,
+             noise_list: Vec::with_capacity(8),
+             scratch_frame: HumanFrame::with_capacity(),
++            frame_key: None,
+         }
+     }
+ 
+@@ -181,8 +184,15 @@ impl HumanAirway {
+ 
+     fn commit(&mut self, a: &HumanArtic, dt: f64) -> &HumanFrame {
+         // compute into the frame kept from last time (its buffers are reused)
++        let kept = self.frame.is_some();
+         let mut f = self.frame.take().unwrap_or_else(|| core::mem::take(&mut self.scratch_frame));
+-        self.tract.compute(a, &mut f);
++        // The geometry depends on the articulators alone: while they stand still (a held vowel),
++        // the frame kept from last time is already this one. (About a fifth of a voice's CPU.)
++        let key = (*a, self.tract.velum_junction, self.tract.area_law);
++        if !kept || self.frame_key != Some(key) {
++            self.tract.compute(a, &mut f);
++            self.frame_key = Some(key);
++        }
+         let (ph_len, or_len) = self.tract.resample(a, &f, &mut self.ph_areas, &mut self.or_areas, Some(&mut self.ph_min), Some(&mut self.or_min));
+         if dt > 0.0
+             && let Some(base) = &self.base
 diff --git a/crates/chimera/src/voice/human_voice.rs b/crates/chimera/src/voice/human_voice.rs
 index 9092506..e9c3c31 100644
 --- a/crates/chimera/src/voice/human_voice.rs

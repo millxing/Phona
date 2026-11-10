@@ -67,7 +67,7 @@ git -C engine apply ../rack-plugin/engine-fork.patch
 copy against 092b16ce, so regenerate it after any engine edit (`git -C engine diff 092b16ce > ../rack-plugin/...`).
 Git state: everything up to and including the external input is committed (outer repo branch `singer-controls`,
 commit ec704b8; engine branch `rack`, commit 51608fe). The nasal fix (`velum_junction`), the grey-out of
-fold-only controls and the CPU changes (see "CPU optimisation") are NOT committed yet. The five host changes
+fold-only controls and the CPU changes (see "CPU optimisation") are committed. The five host changes
 below leave default behaviour bit-identical (the engine's own suite passes, 83 tests, no failures, no re-bless):
 - `HumanVoice::limiter: bool` (default true) switches off the output limiter (0.75 envelope gain + 0.85 soft
   clip).
@@ -324,6 +324,22 @@ FALSE FOLDS was removed (subtle effect); `ventricular` is sent as 0 and the Rust
   not corrected.
 
 ## CPU optimisation
+
+**Rack's CPU meter against these numbers (2026-11-09).** After the optimised build the user saw 28.5% on
+the module's meter and reported it as worse. Timing `Singer::process()` of the real `plugin.dylib` outside
+Rack (a small C++ harness that loads the plugin against `libRack.dylib`, the user's patch settings, thread
+CPU time) gave: old build 13.0%, new build 8.4% on a performance core; old 70%, new 44% on an efficiency
+core (`taskpolicy -b`). The engine is about 5x slower on an efficiency core, and the meter measures elapsed
+time, so its reading depends on which core macOS gives the audio thread (the machine was busy: a browser at
+550% CPU, Spotlight indexing, Ableton Live). Compare old and new builds only under the same load. Flush-to-
+zero (which Rack sets) made no difference.
+
+The meter still read 28% with the other programs closed. Reproduced outside Rack by pacing the harness as
+real-time audio (one 256-sample block every 5.33 ms, then sleep): old build about 36%, new build about 27%
+(against 13.0% / 8.4% in a continuous loop). A light, bursty load runs about 3x slower per sample on this
+Mac (macOS keeps the core slow or uses an efficiency core), and Rack's meter shows elapsed time. So: the
+meter overstates the cost at light load, percentages do not add linearly as a patch grows, and in Rack
+conditions the optimised build saves about 25%, not the 35-52% of the continuous benchmark.
 
 Measured with `rust/examples/bench.rs`: per-sample calls as the module makes them (`chim_set` every 16 samples,
 `chim_render_ext` one sample at a time), 48 kHz, male C3 and female C4. It reports process CPU time
