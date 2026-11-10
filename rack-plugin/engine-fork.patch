@@ -1,3 +1,89 @@
+diff --git a/crates/chimera/src/anatomy/human.rs b/crates/chimera/src/anatomy/human.rs
+index 62b7d26..aecd05c 100644
+--- a/crates/chimera/src/anatomy/human.rs
++++ b/crates/chimera/src/anatomy/human.rs
+@@ -638,6 +638,17 @@ pub struct HumanVocalTract {
+     pub contact_tip_n: Vec2,
+     pub contact_body_n: Vec2,
+     pub area_law: AreaLaw,
++    /// Keep the way to the nose open behind a lowered velum (off by default).
++    ///
++    /// The tract splits pharynx and mouth at a fixed fan ray (150°), above the uvula. A lowered
++    /// velum hangs below that ray, so the gap between its oral surface and the tongue is counted
++    /// as pharynx: when a back vowel's tongue meets the velum the "pharynx" seals below the nasal
++    /// port and both the mouth and the nose are cut off (silence). In a real tract that contact
++    /// closes only the mouth, and the air passes behind the velum into the nose ([ŋ]). With this
++    /// on, the pharynx sections above the foot of the port window are at least as wide as the
++    /// port. (Moving the junction itself down to the uvula shortens the pharynx tube by up to
++    /// 2 cm, which breaks the network's stability limit: tried, and it blew up.)
++    pub velum_junction: bool,
+ }
+ 
+ impl HumanVocalTract {
+@@ -658,6 +669,7 @@ impl HumanVocalTract {
+             contact_tip_n: v(0.0, -1.0),
+             contact_body_n: v(0.0, -1.0),
+             area_law: AreaLaw { pharynx: (2.0, 1.4), oral: (2.6, 1.4), front: (2.0, 1.4), ahead: (1.6, 1.4) },
++            velum_junction: false,
+         };
+         let p = |x: f64, y: f64| t.p(x, y);
+         // posterior pharyngeal wall, bottom → top (curving forward into nasopharynx roof)
+@@ -786,6 +798,8 @@ impl HumanVocalTract {
+         }
+         // bridge to the uvula tip (velopharyngeal port window)
+         let roof_start = outer.len();
++        // where the port window leaves the posterior wall (see `velum_junction`)
++        let lid0 = v(outer.xs[roof_start - 1], outer.ys[roof_start - 1]);
+         for i in (0..sc.vel_oral.len()).rev() {
+             outer.push(sc.vel_oral[i]);
+         }
+@@ -928,6 +942,7 @@ impl HumanVocalTract {
+         let y_phar_top = self.polar_c.y;
+         let n_ph = 12usize;
+         let mut split_index: i32 = -1;
++        let n_hz;
+         let teeth_idx;
+         {
+             let outer = &sc.outer;
+@@ -1021,6 +1036,7 @@ impl HumanVocalTract {
+                     grid.push(sample(m, 1));
+                 }
+             }
++            n_hz = grid.len();
+             // oral family: rays from a centre that glides from C1 (mid-oral) to C2 (behind the incisors)
+             // while the angle sweeps back → up → forward; consecutive rays never cross inside the airway.
+             let n_rad = 30;
+@@ -1222,6 +1238,30 @@ impl HumanVocalTract {
+         f.teeth_s = if teeth_idx < grid.len() { grid[teeth_idx].s } else { grid[last].s };
+         f.lip_s = grid[last].s;
+         f.pharynx_length = if split_index > 0 { grid[split_index as usize].s } else { grid[n_ph].s };
++        if self.velum_junction && v_open > 0.0 {
++            // How far each ray passes above the point where the port window leaves the wall: the
++            // horizontals by their height, the fan rays (all from `polar_c` this far back) by the
++            // point's distance from their line. Rays above it measure the gap in front of the
++            // velum; the passage behind the velum is at least as wide as the port it leads to.
++            let pc = self.polar_c;
++            let end = if split_index > 0 { split_index as usize } else { js_min(n_ph as f64, last as f64) as usize };
++            let behind = js_max(0.0, a.velum) * k * k * smoothstep(0.0, 0.25, v_open);
++            // the junction's own sample included: the pharynx tube's last section reaches it
++            for i in 0..=end {
++                let g = &mut grid[i];
++                let above = if i < n_hz {
++                    g.outer.y - lid0.y
++                } else {
++                    let (dx, dy) = (g.outer.x - pc.x, g.outer.y - pc.y);
++                    (dx * (lid0.y - pc.y) - dy * (lid0.x - pc.x)) / js_max(1e-9, hypot(dx, dy))
++                };
++                // fades in over the first 2 mm above the window's foot, so nothing jumps as it moves
++                let floor = behind * smoothstep(0.0, 0.2 * k, above);
++                if g.area < floor {
++                    g.area = floor;
++                }
++            }
++        }
+         f.length = f.lip_s;
+         f.lip_area = grid[last].area;
+ 
 diff --git a/crates/chimera/src/sources/glottis.rs b/crates/chimera/src/sources/glottis.rs
 index 83ce8e5..bffa4fe 100644
 --- a/crates/chimera/src/sources/glottis.rs

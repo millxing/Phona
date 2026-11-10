@@ -278,7 +278,40 @@ struct PanelLabel : TransparentWidget {
 	}
 };
 
+// Greys out a control that acts only on the vocal folds, by the share of the sound that comes
+// from EXT IN instead (a wash of the panel colour over the label, knob and jack). The controls
+// still work: at SOURCE 50% they act on the fold half of the sound.
+struct DimOverlay : TransparentWidget {
+	Singer* module = nullptr;
+	NVGcolor panel;
+	void draw(const DrawArgs& args) override {
+		float amount = 1.f;
+		if (module) {
+			if (!module->inputs[Singer::EXT_INPUT].isConnected()) return;
+			amount = module->params[Singer::SOURCE_PARAM].getValue();
+		}
+		else if (!getenv("CHIMERA_DIM_PREVIEW")) {
+			return; // module browser / screenshot: not dimmed (set the variable to check the overlays)
+		}
+		if (amount <= 0.f) return;
+		nvgBeginPath(args.vg);
+		nvgRect(args.vg, 0, 0, box.size.x, box.size.y);
+		nvgFillColor(args.vg, nvgTransRGBAf(panel, 0.72f * amount));
+		nvgFill(args.vg);
+	}
+};
+
 struct SingerWidget : ModuleWidget {
+	// fold-only controls: the pitch row, and TENSION, BRIGHT, ROUGH, FRY and EFFORT
+	void addDim(Singer* module, Vec centerMm, Vec sizeMm, NVGcolor panel = nvgRGB(0xe8, 0xe4, 0xdc)) {
+		DimOverlay* d = new DimOverlay;
+		d->module = module;
+		d->panel = panel; // must match res/Singer.svg under the overlay
+		d->box.pos = mm2px(Vec(centerMm.x - sizeMm.x / 2.f, centerMm.y - sizeMm.y / 2.f));
+		d->box.size = mm2px(sizeMm);
+		addChild(d);
+	}
+
 	SingerWidget(Singer* module) {
 		setModule(module);
 		setPanel(createPanel(asset::plugin(pluginInstance, "res/Singer.svg")));
@@ -338,6 +371,12 @@ struct SingerWidget : ModuleWidget {
 		addParam(createParamCentered<RoundBlackKnob>(mm2px(Vec(71.5f, 115.f)), module, Singer::SOURCE_PARAM));
 		addChild(new PanelLabel(mm2px(Vec(91.44f, 106.f)), "OUT", 7.f));
 		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(91.44f, 115.f)), module, Singer::AUDIO_OUTPUT));
+
+		// added last so they draw over the controls
+		addDim(module, Vec(50.8f, 28.5f), Vec(100.f, 28.f));              // pitch row
+		for (int col : {0, 1, 3, 4})                                       // source row except BREATHY
+			addDim(module, Vec(10.16f + col * 20.32f, 86.5f), Vec(19.5f, 28.f));
+		addDim(module, Vec(17.f, 113.f), Vec(24.f, 18.f), nvgRGB(0xd6, 0xcf, 0xc2)); // EFFORT knob and CV
 	}
 };
 

@@ -160,6 +160,7 @@ fn blend_vowel(vowels: &[ArticPatch; 5], x: f64) -> ArticPatch {
 fn velum_table(fs: f64, body: BodyMix, vowels: &[ArticPatch; 5]) -> [f64; VEL_N] {
     const MIN_AREA: f64 = 0.1; // cm²: below this anywhere along the tract counts as sealed
     let mut airway = HumanAirway::new(fs, body.body());
+    airway.tract.velum_junction = true;
     let mut out = [1.4; VEL_N];
     for (j, slot) in out.iter_mut().enumerate() {
         let posture = blend_vowel(vowels, j as f64 / VEL_STEPS as f64);
@@ -175,7 +176,9 @@ fn velum_table(fs: f64, body: BodyMix, vowels: &[ArticPatch; 5]) -> [f64; VEL_N]
         while v <= 1.4 + 1e-9 {
             *a.get_mut(ArticKey::Velum) = v;
             let f = airway.apply(&a, 0.0);
-            if f.grid.iter().all(|g| g.area >= MIN_AREA || g.s >= f.lip_s - 0.5) {
+            // only a seal below the nasal junction silences the voice: one above it closes the
+            // mouth alone and the sound leaves through the nose (an [ŋ]-like hum)
+            if f.grid.iter().all(|g| g.area >= MIN_AREA || g.s >= f.pharynx_length) {
                 best = v;
             } else {
                 break;
@@ -278,6 +281,7 @@ pub extern "C" fn chim_new(sample_rate: f64, female: f64, child: f64) -> *mut Ch
         engine.set_body(body);
         let vowels = VOWELS.map(|v| vowel_artic(v, body).unwrap_or_default());
         let velum_max = velum_table(fs, body, &vowels);
+        engine.voice_mut().airway.tract.velum_junction = true; // the nose stays reachable behind a lowered velum
         engine.voice_mut().limiter = false; // true dynamics; `soft_clip` guards the output
         engine.set_artic(&vowels[2], Some(true));
         // Warm up off the audio thread: the first control tick lazily allocates the airway's
