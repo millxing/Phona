@@ -16,6 +16,16 @@ OBJECTS += $(RUST_LIB)
 .PHONY: FORCE
 FORCE:
 $(RUST_LIB): FORCE
-	cd $(RUST_DIR) && MACOSX_DEPLOYMENT_TARGET=11.0 cargo build --release
+# The path remap keeps the build machine's folder names (user name) out of the shared binary.
+	cd $(RUST_DIR) && MACOSX_DEPLOYMENT_TARGET=11.0 \
+		RUSTFLAGS="--remap-path-prefix=$(abspath ..)=. --remap-path-prefix=$(HOME)=~" \
+		cargo build --release
 
 include $(RACK_DIR)/plugin.mk
+
+# Package to give to other people: the same as `dist`, but without the build machine's user name
+# in the archive headers. Output: share/<slug>-<version>-<arch>.vcvplugin
+.PHONY: share
+share: dist
+	mkdir -p share
+	cd dist && tar --no-xattrs --uid 0 --gid 0 --uname "" --gname "" -c $(SLUG) | zstd -$(ZSTD_COMPRESSION_LEVEL) -f -o ../share/"$(SLUG)"-"$(VERSION)"-$(ARCH_NAME).vcvplugin

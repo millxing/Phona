@@ -1,10 +1,10 @@
 {
-  "slug": "ChimeraVoice",
-  "name": "Chimera Voice (prototype)",
-  "version": "2.0.0",
+  "slug": "Phona",
+  "name": "Phona",
+  "version": "2.1.0",
   "license": "MIT",
-  "brand": "Chimera Voice",
-  "author": "Rob Schoen",
+  "brand": "Phona",
+  "author": "Spunoza",
   "authorEmail": "",
   "authorUrl": "",
   "pluginUrl": "",
@@ -14,9 +14,9 @@
   "changelogUrl": "",
   "modules": [
     {
-      "slug": "Singer",
-      "name": "Singer",
-      "description": "Physical-model singing voice (prototype)",
+      "slug": "Phona",
+      "name": "Phona",
+      "description": "Physical-model singing voice: vocal folds and vocal tract, with an external input (talk box)",
       "tags": ["Oscillator", "Voltage-controlled oscillator"]
     }
   ]

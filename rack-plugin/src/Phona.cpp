@@ -9,7 +9,7 @@
 // Real-time rules: the audio thread only calls chim_set / chim_render. Building a voice (sample
 // rate or body change) allocates, so a worker thread builds it and hands it over through an
 // atomic pointer; the old voice goes back to the worker to be freed.
-struct Singer : Module {
+struct Phona : Module {
 	enum ParamId {
 		// pitch group
 		PITCH_PARAM, FINE_PARAM, GLIDE_PARAM, VIBDEPTH_PARAM, VIBRATE_PARAM,
@@ -66,7 +66,7 @@ struct Singer : Module {
 	int gateHold = 0;       // samples a gate onset is held open so the engine's control tick sees it
 	float heldGate = 0.f;
 
-	Singer() {
+	Phona() {
 		config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
 		configParam(PITCH_PARAM, -36.f, 36.f, -12.f, "Pitch", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
 		getParamQuantity(PITCH_PARAM)->snapEnabled = true; // semitone steps; FINE covers the gaps
@@ -110,7 +110,7 @@ struct Singer : Module {
 		worker = std::thread([this] { work(); });
 	}
 
-	~Singer() {
+	~Phona() {
 		running = false;
 		worker.join();
 		destroy(active);
@@ -282,7 +282,7 @@ struct Singer : Module {
 	}
 };
 
-// Panel colours. The same values are in tools/panel.py, which writes res/Singer.svg.
+// Panel colours. The same values are in tools/panel.py, which writes res/Phona.svg.
 static const NVGcolor INK = nvgRGB(0x24, 0x21, 0x1d);
 static const NVGcolor AMBER = nvgRGB(0xd9, 0x8a, 0x1f);
 static const NVGcolor MOD_BLUE = nvgRGB(0x1f, 0x7a, 0xd9);
@@ -341,14 +341,16 @@ static std::string readoutText(int kind, float v) {
 	}
 }
 
-// The knob's own setting (CV not included) in a small plate under the knob. VOWEL has a dark
-// plate with the vowel letter.
+// The knob's setting in a small plate under the knob. With a cable in the knob's CV input it shows
+// the value in use (knob + CV) in blue. VOWEL has a dark plate with the vowel letter.
 struct ValueDisplay : TransparentWidget {
-	Singer* module = nullptr;
-	int param = 0, kind = R_NUM;
+	Phona* module = nullptr;
+	int param = 0, input = -1, kind = R_NUM;
 	float def = 0.f; // shown in the module browser, where there is no module
 	void draw(const DrawArgs& args) override {
 		float v = module ? module->params[param].getValue() : def;
+		bool live = module && input >= 0 && module->inputs[input].isConnected();
+		if (live) v = module->modShown[param];
 		bool dark = kind == R_VOWEL;
 		nvgBeginPath(args.vg);
 		nvgRoundedRect(args.vg, 0, 0, box.size.x, box.size.y, box.size.y / 2.f);
@@ -359,7 +361,8 @@ struct ValueDisplay : TransparentWidget {
 		nvgFontFaceId(args.vg, font->handle);
 		nvgFontSize(args.vg, dark ? 7.5f : 6.3f);
 		nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
-		nvgFillColor(args.vg, dark ? nvgRGB(0xf0, 0xa8, 0x3c) : INK);
+		if (live) nvgFillColor(args.vg, dark ? nvgRGB(0x6c, 0xb4, 0xf5) : nvgRGB(0x16, 0x5c, 0xa8));
+		else nvgFillColor(args.vg, dark ? nvgRGB(0xf0, 0xa8, 0x3c) : INK);
 		nvgText(args.vg, box.size.x / 2.f, box.size.y / 2.f + 0.3f, readoutText(kind, v).c_str(), NULL);
 	}
 };
@@ -369,7 +372,7 @@ struct ValueDisplay : TransparentWidget {
 // a blue arc goes from the knob's setting to the value in use (knob + CV), so it shows how far
 // and in which direction the modulation moves the control at this moment.
 struct ValueArc : TransparentWidget {
-	Singer* module = nullptr;
+	Phona* module = nullptr;
 	int param = 0, input = -1;
 	float mn = 0.f, mx = 1.f, def = 0.f; // used when there is no module
 	float radius = 10.f;
@@ -422,14 +425,16 @@ struct ValueArc : TransparentWidget {
 // from EXT IN instead (a wash of the panel colour over the label, knob and jack). The controls
 // still work: at SOURCE 50% they act on the fold half of the sound.
 struct DimOverlay : TransparentWidget {
-	Singer* module = nullptr;
+	Phona* module = nullptr;
+	bool whenUnpatched = false; // SOURCE: the opposite case, no effect without a cable in EXT IN
 	void draw(const DrawArgs& args) override {
 		float amount = 1.f;
 		if (module) {
-			if (!module->inputs[Singer::EXT_INPUT].isConnected()) return;
-			amount = module->sourceShown; // knob + CV
+			bool ext = module->inputs[Phona::EXT_INPUT].isConnected();
+			if (ext == whenUnpatched) return;
+			if (!whenUnpatched) amount = module->sourceShown; // knob + CV
 		}
-		else if (!getenv("CHIMERA_DIM_PREVIEW")) {
+		else if (whenUnpatched || !getenv("CHIMERA_DIM_PREVIEW")) {
 			return; // module browser / screenshot: not dimmed (set the variable to check the overlays)
 		}
 		if (amount <= 0.f) return;
@@ -440,7 +445,7 @@ struct DimOverlay : TransparentWidget {
 	}
 };
 
-struct SingerWidget : ModuleWidget {
+struct PhonaWidget : ModuleWidget {
 	// Panel geometry (mm), the same numbers as in tools/panel.py. A dark title bar, then four
 	// bands of equal height. Each band holds one card: a header strip with the section name,
 	// then the cells.
@@ -452,9 +457,10 @@ struct SingerWidget : ModuleWidget {
 	static float cellX(int row, int n, int col) { return cellLeft(row) + cellW(row, n) * (col + 0.5f); }
 
 	// fold-only controls are washed with the card colour when EXT IN takes over
-	void addDim(Singer* module, int row, float x0, float x1) {
+	void addDim(Phona* module, int row, float x0, float x1, bool whenUnpatched = false) {
 		DimOverlay* d = new DimOverlay;
 		d->module = module;
+		d->whenUnpatched = whenUnpatched;
 		d->box.pos = mm2px(Vec(x0, ROW0 + row * ROW_H + 4.2f));
 		d->box.size = mm2px(Vec(x1 - x0, 25.2f));
 		addChild(d);
@@ -464,15 +470,15 @@ struct SingerWidget : ModuleWidget {
 		addChild(new PanelLabel(mm2px(Vec(x, y)), text));
 	}
 
-	SingerWidget(Singer* module) {
+	PhonaWidget(Phona* module) {
 		setModule(module);
-		setPanel(createPanel(asset::plugin(pluginInstance, "res/Singer.svg")));
+		setPanel(createPanel(asset::plugin(pluginInstance, "res/Phona.svg")));
 
-		PanelLabel* title = new PanelLabel(mm2px(Vec(50.8, 4.1)), "SINGER", 14.f);
+		PanelLabel* title = new PanelLabel(mm2px(Vec(50.8, 4.1)), "PHONA", 14.f);
 		title->color = nvgRGB(0xf3, 0xeb, 0xdc);
 		title->spacing = 3.f;
 		addChild(title);
-		addChild(createLightCentered<SmallLight<GreenRedLight>>(mm2px(Vec(96.5, 4.1)), module, Singer::STATUS_LIGHT));
+		addChild(createLightCentered<SmallLight<GreenRedLight>>(mm2px(Vec(96.5, 4.1)), module, Phona::STATUS_LIGHT));
 
 		const char* sections[4] = {"PITCH", "VOCAL TRACT", "VOCAL FOLDS", "BREATH / EXTERNAL / OUT"};
 		for (int r = 0; r < 4; r++) {
@@ -490,21 +496,21 @@ struct SingerWidget : ModuleWidget {
 		// position. `mn, mx, def` repeat the param's range for the module browser only.
 		struct Cell { int row, n, col, param, input, att; const char* name; bool big; int kind; float mn, mx, def; };
 		const Cell cells[] = {
-			{0, 5, 0, Singer::PITCH_PARAM, Singer::VOCT_INPUT, -1, "PITCH", true, R_NOTE, -36.f, 36.f, -12.f},
-			{0, 5, 1, Singer::FINE_PARAM, -1, -1, "FINE", false, R_FINE, -1.f, 1.f, 0.f},
-			{0, 5, 2, Singer::GLIDE_PARAM, Singer::GLIDE_INPUT, Singer::GLIDE_ATT_PARAM, "GLIDE", false, R_MS, 0.f, 1.f, 0.547f},
-			{0, 5, 3, Singer::VIBDEPTH_PARAM, Singer::VIBDEPTH_INPUT, Singer::VIBDEPTH_ATT_PARAM, "VIB DEPTH", false, R_CENTS, 0.f, 200.f, 0.f},
-			{0, 5, 4, Singer::VIBRATE_PARAM, Singer::VIBRATE_INPUT, Singer::VIBRATE_ATT_PARAM, "VIB RATE", false, R_HZ, 0.5f, 12.f, 5.5f},
-			{1, 4, 0, Singer::VOWEL_PARAM, Singer::VOWEL_INPUT, Singer::VOWEL_ATT_PARAM, "VOWEL", true, R_VOWEL, 0.f, 4.f, 2.f},
-			{1, 4, 1, Singer::NASAL_PARAM, Singer::NASAL_INPUT, Singer::NASAL_ATT_PARAM, "NASAL", false, R_PCT, 0.f, 1.f, 0.06f},
-			{1, 4, 2, Singer::LARYNX_PARAM, Singer::LARYNX_INPUT, Singer::LARYNX_ATT_PARAM, "LARYNX", false, R_CM, -1.6f, 1.6f, 0.f},
-			{2, 5, 0, Singer::TENSION_PARAM, Singer::TENSION_INPUT, Singer::TENSION_ATT_PARAM, "TENSION", false, R_NUM, -0.5f, 1.5f, 0.5f},
-			{2, 5, 1, Singer::BRIGHT_PARAM, Singer::BRIGHT_INPUT, Singer::BRIGHT_ATT_PARAM, "BRIGHT", false, R_NUM, -0.5f, 1.5f, 0.25f},
-			{2, 5, 2, Singer::BREATHY_PARAM, Singer::BREATHY_INPUT, Singer::BREATHY_ATT_PARAM, "BREATHY", false, R_NUM, 0.f, 1.5f, 0.15f},
-			{2, 5, 3, Singer::ROUGH_PARAM, Singer::ROUGH_INPUT, Singer::ROUGH_ATT_PARAM, "ROUGH", false, R_NUM, 0.f, 2.f, 0.1f},
-			{2, 5, 4, Singer::FRY_PARAM, Singer::FRY_INPUT, Singer::FRY_ATT_PARAM, "FRY", false, R_PCT, 0.f, 1.f, 0.f},
-			{3, 5, 0, Singer::EFFORT_PARAM, Singer::EFFORT_INPUT, Singer::EFFORT_ATT_PARAM, "EFFORT", false, R_PCT, 0.25f, 2.f, 1.f},
-			{3, 5, 3, Singer::SOURCE_PARAM, Singer::SOURCE_INPUT, Singer::SOURCE_ATT_PARAM, "SOURCE", false, R_PCT, 0.f, 1.f, 1.f},
+			{0, 5, 0, Phona::PITCH_PARAM, Phona::VOCT_INPUT, -1, "PITCH", true, R_NOTE, -36.f, 36.f, -12.f},
+			{0, 5, 1, Phona::FINE_PARAM, -1, -1, "FINE", false, R_FINE, -1.f, 1.f, 0.f},
+			{0, 5, 2, Phona::GLIDE_PARAM, Phona::GLIDE_INPUT, Phona::GLIDE_ATT_PARAM, "GLIDE", false, R_MS, 0.f, 1.f, 0.547f},
+			{0, 5, 3, Phona::VIBDEPTH_PARAM, Phona::VIBDEPTH_INPUT, Phona::VIBDEPTH_ATT_PARAM, "VIB DEPTH", false, R_CENTS, 0.f, 200.f, 0.f},
+			{0, 5, 4, Phona::VIBRATE_PARAM, Phona::VIBRATE_INPUT, Phona::VIBRATE_ATT_PARAM, "VIB RATE", false, R_HZ, 0.5f, 12.f, 5.5f},
+			{1, 4, 0, Phona::VOWEL_PARAM, Phona::VOWEL_INPUT, Phona::VOWEL_ATT_PARAM, "VOWEL", true, R_VOWEL, 0.f, 4.f, 2.f},
+			{1, 4, 1, Phona::NASAL_PARAM, Phona::NASAL_INPUT, Phona::NASAL_ATT_PARAM, "NASAL", false, R_PCT, 0.f, 1.f, 0.06f},
+			{1, 4, 2, Phona::LARYNX_PARAM, Phona::LARYNX_INPUT, Phona::LARYNX_ATT_PARAM, "LARYNX", false, R_CM, -1.6f, 1.6f, 0.f},
+			{2, 5, 0, Phona::TENSION_PARAM, Phona::TENSION_INPUT, Phona::TENSION_ATT_PARAM, "TENSION", false, R_NUM, -0.5f, 1.5f, 0.5f},
+			{2, 5, 1, Phona::BRIGHT_PARAM, Phona::BRIGHT_INPUT, Phona::BRIGHT_ATT_PARAM, "BRIGHT", false, R_NUM, -0.5f, 1.5f, 0.25f},
+			{2, 5, 2, Phona::BREATHY_PARAM, Phona::BREATHY_INPUT, Phona::BREATHY_ATT_PARAM, "BREATHY", false, R_NUM, 0.f, 1.5f, 0.15f},
+			{2, 5, 3, Phona::ROUGH_PARAM, Phona::ROUGH_INPUT, Phona::ROUGH_ATT_PARAM, "ROUGH", false, R_NUM, 0.f, 2.f, 0.1f},
+			{2, 5, 4, Phona::FRY_PARAM, Phona::FRY_INPUT, Phona::FRY_ATT_PARAM, "FRY", false, R_PCT, 0.f, 1.f, 0.f},
+			{3, 5, 0, Phona::EFFORT_PARAM, Phona::EFFORT_INPUT, Phona::EFFORT_ATT_PARAM, "EFFORT", false, R_PCT, 0.25f, 2.f, 1.f},
+			{3, 5, 3, Phona::SOURCE_PARAM, Phona::SOURCE_INPUT, Phona::SOURCE_ATT_PARAM, "SOURCE", false, R_PCT, 0.f, 1.f, 1.f},
 		};
 		for (const Cell& c : cells) {
 			float x = cellX(c.row, c.n, c.col);
@@ -529,6 +535,7 @@ struct SingerWidget : ModuleWidget {
 			ValueDisplay* disp = new ValueDisplay;
 			disp->module = module;
 			disp->param = c.param;
+			disp->input = c.input;
 			disp->kind = c.kind;
 			disp->def = c.def;
 			Vec ds = c.kind == R_VOWEL ? Vec(6.f, 2.9f) : Vec(9.6f, 2.5f);
@@ -550,15 +557,15 @@ struct SingerWidget : ModuleWidget {
 		float y1 = ROW0 + 1 * ROW_H, y3 = ROW0 + 3 * ROW_H;
 		float bx = cellX(1, 4, 3);
 		addLabel(bx, y1 + LABEL_Y, "BODY");
-		addParam(createParamCentered<CKSS>(mm2px(Vec(bx, y1 + midY)), module, Singer::BODY_PARAM));
+		addParam(createParamCentered<CKSS>(mm2px(Vec(bx, y1 + midY)), module, Phona::BODY_PARAM));
 		addLabel(bx + 5.f, y1 + midY - 2.6f, "F"); // CKSS: up = 1 = female
 		addLabel(bx + 5.f, y1 + midY + 2.6f, "M");
 		addLabel(cellX(3, 5, 1), y3 + LABEL_Y, "GATE");
-		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(cellX(3, 5, 1), y3 + midY)), module, Singer::GATE_INPUT));
+		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(cellX(3, 5, 1), y3 + midY)), module, Phona::GATE_INPUT));
 		addLabel(cellX(3, 5, 2), y3 + LABEL_Y, "EXT IN");
-		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(cellX(3, 5, 2), y3 + midY)), module, Singer::EXT_INPUT));
+		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(cellX(3, 5, 2), y3 + midY)), module, Phona::EXT_INPUT));
 		addLabel(cellX(3, 5, 4), y3 + LABEL_Y, "OUT");
-		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(cellX(3, 5, 4), y3 + midY)), module, Singer::AUDIO_OUTPUT));
+		addOutput(createOutputCentered<PJ301MPort>(mm2px(Vec(cellX(3, 5, 4), y3 + midY)), module, Phona::AUDIO_OUTPUT));
 
 		// added last so they draw over the controls: the pitch band, the folds band except
 		// BREATHY, and EFFORT
@@ -569,7 +576,10 @@ struct SingerWidget : ModuleWidget {
 			addDim(module, 2, x - w / 2.f + 0.2f, x + w / 2.f - 0.2f);
 		}
 		addDim(module, 3, 1.7f, 1.5f + cellW(3, 5) - 0.2f);
+		// SOURCE is greyed out the other way round: when nothing is patched into EXT IN
+		float sx = cellX(3, 5, 3);
+		addDim(module, 3, sx - w / 2.f + 0.2f, sx + w / 2.f - 0.2f, true);
 	}
 };
 
-Model* modelSinger = createModel<Singer, SingerWidget>("Singer");
+Model* modelPhona = createModel<Phona, PhonaWidget>("Phona");

@@ -10,6 +10,7 @@ target/
 /rack-plugin/build/
 /rack-plugin/dep/
 /rack-plugin/dist/
+/rack-plugin/share/
 /rack-plugin/plugin.dylib
 
 # Rendered audio (reproducible with spike/audition-tool); keep READMEs, CSV/JSON metrics

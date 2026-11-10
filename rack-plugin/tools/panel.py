@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Writes res/Singer.svg. Run from rack-plugin/:  python3 tools/panel.py
+"""Writes res/Phona.svg. Run from rack-plugin/:  python3 tools/panel.py
 
-The geometry constants are the same as in SingerWidget (src/Singer.cpp). Rack's SVG reader has no
+The geometry constants are the same as in PhonaWidget (src/Phona.cpp). Rack's SVG reader has no
 text, blur or shadow, so the panel is flat shapes only; all text is drawn by the widget.
 """
 W, H = 101.6, 128.5
@@ -10,7 +10,7 @@ CARD_X0, CARD_X1 = 1.5, 100.1    # card left / right
 CARD_Y0, CARD_Y1 = 0.3, 29.6     # card top / bottom within a band
 HEAD_H = 3.7                     # header strip height
 DRAWINGS = False                 # shelved: head (band 1) and vocal folds (band 2) drawings at the left
-LEFT = [1.5, 14.0, 12.5, 1.5] if DRAWINGS else [1.5] * 4  # where the cells start (also cellLeft in Singer.cpp)
+LEFT = [1.5, 14.0, 12.5, 1.5] if DRAWINGS else [1.5] * 4  # where the cells start (also cellLeft in Phona.cpp)
 CELLS = [5, 4, 5, 5]
 TAB_END = [17.0, 26.5, 26.5, 41.0]
 TAB_COL = ["#4a4034", "#3c4a46", "#6e4038", "#3f5268"]
@@ -95,4 +95,4 @@ if DRAWINGS:
         a(f'<path d="M {cx + s * 0.25:.2f} {cy - 4.5:.2f} L {cx + s * 1.75:.2f} {cy + 4.0:.2f}" fill="none" stroke="#f6eee2" stroke-width="0.55" stroke-linecap="round"/>')
 
 a('</svg>')
-open("res/Singer.svg", "w").write("\n".join(o) + "\n")
+open("res/Phona.svg", "w").write("\n".join(o) + "\n")
