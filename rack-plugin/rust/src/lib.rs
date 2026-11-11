@@ -7,9 +7,18 @@
 use chimera::anatomy::human::{ArticKey, ArticPatch, BodyMix, NEUTRAL};
 use chimera::voice::human_airway::HumanAirway;
 use chimera::engine::Engine;
-use chimera::phonetics::planner::vowel_artic;
+use chimera::phonetics::planner::{diphthong_parts, plan_utterance, vowel_artic, PlanOptions};
+use chimera::phonetics::inventory::{phoneme, Manner};
+use chimera::phonetics::{Intonation, Syllable};
 use chimera::voice::human_voice::SourcePatch;
+use chimera::control::score::{ControlKey, Gesture, Targets};
+use chimera::phonetics::english::EnglishG2P;
+use chimera::phonetics::Segment;
+use chimera::phonetics::syllables::lyrics_to_syllables;
+use std::ffi::{c_char, CStr};
+use std::io::Read;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::OnceLock;
 
 /// Vowel morph order along the VOWEL control (0..=4).
 const VOWELS: [&str; 5] = ["i", "e", "ɑ", "o", "u"];
@@ -42,7 +51,487 @@ pub struct ChimVoice {
     /// the breath gate also opens and closes the external sound (target, and smoothed value)
     ext_gate_target: f64,
     ext_gate: f64,
+    /// Lyrics mode (see `chim_set_lyrics`): the syllable being sung, with its plan.
+    lyr_on: bool,
+    lyr: *const ChimLyrics,
+    lyr_held: Option<usize>,
+    /// the gate closed before the vowel had sounded: the note-off waits until `lyr_vowel_ready`
+    lyr_pending_off: bool,
+    lyr_vowel_ready: f64,
+    /// voice-clock time at which the last syllable's coda ends (the next onset waits for it)
+    lyr_tail_end: f64,
+    /// voice-clock time at which the held syllable's gestures start (the breath waits for it)
+    lyr_start: f64,
+    /// voice-clock times between which the gate is lower (see `SylPlan::dip`)
+    lyr_dip: (f64, f64),
+    /// output fade at the end of a coda: muted from `lyr_mute_at` until `lyr_unmute_at` (engine clock)
+    lyr_mute_at: f64,
+    lyr_unmute_at: f64,
+    lyr_fade: f32,
+    /// THUMP high-pass (biquad, transposed direct form 2): coefficients b0, b1, b2, a1, a2 and state
+    hp: [f32; 5],
+    hp_z: [f32; 2],
+    hp_on: bool,
+    /// the tunable values that act at run time (see `chim_set_tune`)
+    tune: [f64; TUNE_N],
+    /// breath level of the note (the gate voltage at its start)
+    lyr_level: f64,
+    dbg_neutral: bool,
     dead: bool,
+}
+
+/// Number of tunable values (Phona Lab). The order is the order of the Lab module's params.
+pub const TUNE_N: usize = 18;
+pub const T_STOP_BREATH: usize = 0; // breath during a last p/t/k (0..1)
+pub const T_STOP_HISS: usize = 1; // x fold opening after a last p/t/k
+pub const T_STOP_CUT: usize = 2; // ms from the release of a last p/t/k to the output fade (>= 150 = no fade)
+pub const T_RELEASE: usize = 3; // x release time of the last consonant
+pub const T_FADE_START: usize = 4; // ms, output fade after other last consonants, from the start of the release
+pub const T_FADE_TIME: usize = 5; // ms
+pub const T_EXHALE: usize = 6; // x fold opening of the breath out after a coda (0 = none)
+pub const T_CODA_LEN: usize = 7; // x times of the note-off plan
+pub const T_ONSET_LEN: usize = 8; // x times of the consonants before the vowel
+pub const T_ONSET_HISS: usize = 9; // x fold opening after a first p/t/k
+pub const T_VOICELESS: usize = 10; // x fold opening for s, f, sh, ...
+pub const T_STRENGTH: usize = 11; // x strength of the consonant closures
+pub const T_MIN_VOWEL: usize = 12; // ms a vowel sounds at least, also for a trigger-length gate
+pub const T_NEXT_WAIT: usize = 13; // x wait for the coda before the next syllable starts
+pub const T_LEVEL: usize = 14; // level correction with lyrics (they came out about 8 dB under the plain voice)
+pub const T_LIMITER: usize = 15; // engine limiter with lyrics (consonant bursts are 3 to 4 times a vowel)
+pub const T_ONSET_BREATH: usize = 16; // breath during the closure of a first p/t/k (1 = full)
+pub const T_THUMP: usize = 17; // output high-pass with lyrics, as a share of the note's pitch (0 = off)
+pub const TUNE_DEFAULT: [f64; TUNE_N] = [0.5, 1.0, 155.0, 1.0, 0.0, 4.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 70.0, 1.0, 1.6, 1.0, 1.0, 0.0];
+
+fn read_tune(t: *const f64) -> [f64; TUNE_N] {
+    let mut out = TUNE_DEFAULT;
+    if !t.is_null() {
+        let src = unsafe { std::slice::from_raw_parts(t, TUNE_N) };
+        for (o, x) in out.iter_mut().zip(src) {
+            if x.is_finite() {
+                *o = *x;
+            }
+        }
+    }
+    out
+}
+
+/// Tag of the open-ended gestures of the syllable in progress.
+const LYR_TAG: f64 = 1.0;
+/// One syllable, planned ahead (planning allocates): the gestures to add at its note-on (onset
+/// consonants, then the vowel held open-ended) and at its note-off (diphthong glide, coda).
+/// Times are relative to the moment of scheduling. The pitch and vibrato channels are removed, so
+/// the pitch stays with the module's own controls.
+struct SylPlan {
+    on: Vec<Gesture>,
+    off: Vec<Gesture>,
+    /// when the vowel begins, after the note-on (s)
+    vowel_t0: f64,
+    /// when the plan's own breath is at full drive, after the note-on (s)
+    breath_t0: f64,
+    /// how long the note-off gestures take (s)
+    off_len: f64,
+    /// when the output fades out, after the note-off (see `coda_end`)
+    mute_at: Option<f64>,
+    /// while a first p/t/k is closed, after the note-on (s): the breath is lower (ONSET BREATH)
+    dip: Option<(f64, f64)>,
+    text: String,
+}
+
+/// Lyrics turned into syllable plans for one body. Built and freed off the audio thread.
+pub struct ChimLyrics {
+    syl: Vec<SylPlan>,
+}
+
+fn g2p() -> &'static EnglishG2P {
+    static G: OnceLock<EnglishG2P> = OnceLock::new();
+    G.get_or_init(|| {
+        let mut text = String::new();
+        let gz: &[u8] = include_bytes!("../../../engine/public/data/cmudict.txt.gz");
+        let _ = flate2::read::GzDecoder::new(gz).read_to_string(&mut text);
+        let mut g = EnglishG2P::new();
+        g.load_dict(&text);
+        g
+    })
+}
+
+/// Pitch and vibrato belong to the module; a gesture left with no target is dropped.
+/// The engine lowers the velum for nasals and otherwise leaves it to the performer, here the
+/// NASAL control: with that control raised, [t] and [d] would come out as [n], [b] as [m]. So
+/// every other consonant's main gesture (the engine plans it at strength 40) also closes the velum.
+fn strip_pitch(gs: Vec<Gesture>) -> Vec<Gesture> {
+    gs.into_iter()
+        .filter_map(|mut g| {
+            g.targets.remove(ControlKey::F0);
+            g.targets.remove(ControlKey::VIBRATO);
+            let nasal = matches!(g.label_str(), "m" | "n" | "ŋ");
+            if g.strength >= 10.0 && !nasal && g.targets.iter().any(|(k, _)| matches!(k, ControlKey::Artic(_))) {
+                g.targets.set(ArticKey::Velum, NEUTRAL.velum);
+            }
+            (!g.targets.is_empty()).then_some(g)
+        })
+        .collect()
+}
+
+fn scale_target(g: &mut Gesture, k: ControlKey, by: f64) {
+    if let Some(x) = g.targets.get(k) {
+        g.targets.set(k, x * by);
+    }
+}
+
+fn scale_times(gs: &mut [Gesture], by: f64) {
+    for g in gs.iter_mut() {
+        g.t0 *= by;
+        if g.t1 < 100.0 {
+            // not an open-ended (held) gesture
+            g.t1 *= by;
+            g.ramp_in *= by;
+            g.ramp_out *= by;
+        }
+    }
+}
+
+/// The note-on plan, with the tunable values applied.
+fn tune_on(mut gs: Vec<Gesture>, t: &[f64; TUNE_N]) -> (Vec<Gesture>, Option<(f64, f64)>) {
+    scale_times(&mut gs, t[T_ONSET_LEN].clamp(0.1, 4.0));
+    for g in gs.iter_mut() {
+        if g.strength >= 10.0 {
+            g.strength *= t[T_STRENGTH].clamp(0.05, 4.0);
+        }
+        match g.label_str() {
+            "aspiration" => scale_target(g, ControlKey::ABDUCTION, t[T_ONSET_HISS].max(0.0)),
+            "voiceless" => scale_target(g, ControlKey::ABDUCTION, t[T_VOICELESS].max(0.0)),
+            _ => {}
+        }
+    }
+    // A first voiceless stop opens with the full breath behind it: a low pressure pulse about
+    // half as high as the vowel's peak. Less breath while it is closed makes the pulse weaker.
+    // The engine takes the higher of the performer's gate and the score's breath, so both must
+    // go down: a breath gesture here, and the gate in `chim_set` for the time this returns.
+    let mut dip = None;
+    if t[T_ONSET_BREATH] < 0.999 {
+        let stops: Vec<(f64, f64)> = gs.iter().filter(|g| g.strength >= 10.0 && matches!(g.label_str(), "p" | "t" | "k")).map(|g| (g.t0, g.t1)).collect();
+        for &(t0, t1) in &stops {
+            gs.push(Gesture::new(t0 - 0.005, t1, 0.02, 0.03, 8.0, Targets::default().with(ControlKey::BREATH, t[T_ONSET_BREATH].max(0.0))).label("breath"));
+        }
+        if !stops.is_empty() {
+            dip = Some((stops.iter().map(|x| x.0).fold(f64::INFINITY, f64::min) - 0.03, stops.iter().map(|x| x.1).fold(0.0, f64::max)));
+        }
+    }
+    (gs, dip)
+}
+
+/// The note-off plan, with the tunable values applied, and the time of the output fade after
+/// the note-off (s; `None` = no fade).
+///
+/// Two faults of the planner's coda on a sung note that ends in a rest:
+/// - It opens the last consonant while there is still some breath, as in speech, and the open
+///   mouth sounds as a short extra vowel ("dum" was "dum-uh"). To hold the consonant closed for
+///   longer does not help: the air caught behind it makes the same sound when it opens, even
+///   0.5 s later. So the output fades out when the last consonant starts to open (plus
+///   FADE START), and comes back with the next syllable.
+/// - A last voiceless stop opens with the full breath behind it: a pressure pulse about half as
+///   high as the vowel's peak, then a burst of hiss near 6 kHz ("pop" had a high blip after it).
+///   Its burst is the consonant, so there is no fade by default (STOP CUT), but less breath
+///   during the closure (STOP BREATH 0.5: pulse 0.55 -> 0.33 of the vowel peak, hiss 10 dB down).
+fn tune_off(mut gs: Vec<Gesture>, t: &[f64; TUNE_N]) -> (Vec<Gesture>, Option<f64>) {
+    scale_times(&mut gs, t[T_CODA_LEN].clamp(0.1, 4.0));
+    let last = gs.iter().filter(|g| g.strength >= 10.0).max_by(|a, b| a.t1.total_cmp(&b.t1)).map(|g| (g.label_str().to_string(), g.t1));
+    // [b], [d], [g] too: the fade took their release away ("big" was heard as "be": right word 28 % -> 55 %)
+    let stop = matches!(last.as_ref().map(|l| l.0.as_str()), Some("p" | "t" | "k" | "b" | "d" | "g"));
+    // An affricate ends in a fricative, which needs the full breath ("church" lost its last
+    // "ch" with the stop's reduced breath: 10 to 13 dB less hiss). The fade waits for that hiss.
+    let affricate = matches!(last.as_ref().map(|l| l.0.as_str()), Some("tʃ" | "dʒ"));
+    for g in gs.iter_mut() {
+        if g.strength >= 10.0 {
+            if last.as_ref().is_some_and(|l| g.t1 > l.1 - 0.03) {
+                g.ramp_out *= t[T_RELEASE].clamp(0.05, 20.0);
+            }
+            g.strength *= t[T_STRENGTH].clamp(0.05, 4.0);
+        }
+        match g.label_str() {
+            "breath" if stop => {
+                g.targets.set(ControlKey::BREATH, t[T_STOP_BREATH].clamp(0.0, 1.5));
+            }
+            "aspiration" if stop => scale_target(g, ControlKey::ABDUCTION, t[T_STOP_HISS].max(0.0)),
+            "voiceless" => scale_target(g, ControlKey::ABDUCTION, t[T_VOICELESS].max(0.0)),
+            "exhale" => scale_target(g, ControlKey::ABDUCTION, t[T_EXHALE].max(0.0)),
+            _ => {}
+        }
+    }
+    if t[T_EXHALE] <= 0.0 {
+        gs.retain(|g| g.label_str() != "exhale");
+    }
+    let mute_at = last.and_then(|(_, t1)| {
+        if !stop {
+            Some((t1 + if affricate { 0.02 } else { 0.0 } + t[T_FADE_START] * 0.001).max(0.0))
+        } else if t[T_STOP_CUT] < 150.0 {
+            Some(t1 + t[T_STOP_CUT].max(0.0) * 0.001)
+        } else {
+            None
+        }
+    });
+    (gs, mute_at)
+}
+
+/// When a syllable's gestures start, after its note-on (s). The engine's live planner puts them
+/// 45 ms in the past to save latency: the first consonant then starts half formed, with the
+/// breath already on, and a first [p], [t] or [k] is heard as [h] or not at all. A speech
+/// recognizer gave the right word 41 % of the time with -0.045, 66 % with 0 and 67 % with 0.02
+/// (20 words with stops, one pitch; the same words planned in one piece: 68 %).
+const ON_T0: f64 = 0.02;
+/// The same for the coda, after the note-off: 54 % with -0.045, 67 % with -0.02.
+const OFF_T0: f64 = -0.02;
+
+/// Consonants at the length the planner's duration rules give them (their spoken length). An
+/// affricate keeps 0.7 of its table length, as in the engine's live planner: the rules make
+/// it half as long, and "church" was then heard as "it" (right word 17 % -> 59 %).
+fn bare(segs: &[Segment], body: BodyMix) -> Vec<Segment> {
+    segs.iter()
+        .map(|c| {
+            let d = phoneme(&c.ipa, body).filter(|d| d.manner == Manner::Affricate);
+            Segment { ipa: c.ipa.clone(), dur: d.map(|d| d.dur * 0.7), ..Default::default() }
+        })
+        .collect()
+}
+
+/// The note-on plan: the onset consonants at their spoken length (the engine's live planner
+/// makes them 0.7 times as long), then the vowel, held open-ended.
+fn plan_on(s: &Syllable, body: BodyMix) -> Vec<Gesture> {
+    let mut segs = bare(&s.onset, body);
+    let parts = diphthong_parts(&s.nucleus.ipa);
+    segs.push(Segment { ipa: parts.map_or(s.nucleus.ipa.clone(), |p| p.0.to_string()), dur: Some(30.0), f0: Some(220.0), stress: Some(1), word_end: None });
+    plan_utterance(&segs, &PlanOptions { body, t0: ON_T0, f0: Some(220.0), intonation: Some(Intonation::Flat), open_end: Some(true), ..Default::default() }).gestures
+}
+
+/// The note-off plan: the diphthong's glide and the coda at its spoken length.
+fn plan_off(s: &Syllable, body: BodyMix) -> Vec<Gesture> {
+    let mut segs: Vec<Segment> = Vec::new();
+    if let Some((_, b)) = diphthong_parts(&s.nucleus.ipa) {
+        segs.push(Segment { ipa: b.to_string(), dur: Some(0.07), stress: Some(1), f0: Some(220.0), word_end: None });
+    }
+    segs.extend(bare(&s.coda, body));
+    if segs.is_empty() {
+        return Vec::new();
+    }
+    plan_utterance(&segs, &PlanOptions { body, t0: OFF_T0, f0: Some(220.0), intonation: Some(Intonation::Flat), ..Default::default() }).gestures
+}
+
+/// Singing syllables that are not English words, or that the spelling rules get wrong
+/// ("fah" came out as the vowel of "cat" with an [h] after it).
+fn sung_syllable(w: &str) -> Option<&'static [&'static str]> {
+    Some(match w {
+        "doh" => &["d", "oʊ"],
+        "re" | "ray" => &["ɹ", "eɪ"],
+        "mi" | "mee" => &["m", "i"],
+        "fa" | "fah" => &["f", "ɑ"],
+        "sol" => &["s", "oʊ", "l"],
+        "soh" => &["s", "oʊ"],
+        "la" | "lah" => &["l", "ɑ"],
+        "ti" | "tee" => &["t", "i"],
+        "da" | "dah" => &["d", "ɑ"],
+        "ba" | "bah" => &["b", "ɑ"],
+        "na" | "nah" => &["n", "ɑ"],
+        "ah" | "aah" | "ahh" => &["ɑ"],
+        "oh" | "ohh" => &["oʊ"],
+        "oo" | "ooh" => &["u"],
+        "ee" | "eee" => &["i"],
+        "doo" => &["d", "u"],
+        "dum" => &["d", "ʌ", "m"],
+        "sha" => &["ʃ", "ɑ"],
+        _ => return None,
+    })
+}
+
+/// Lyrics text → syllable plans. `text` is UTF-8 (NUL-terminated). Words are looked up in the CMU
+/// pronouncing dictionary (letter-to-sound rules for the rest); a typed hyphen splits syllables
+/// ("ti-ger"). Allocates: call OFF the audio thread. Returns null on failure or for no syllables.
+#[no_mangle]
+pub extern "C" fn chim_lyrics_new(text: *const c_char, female: f64, tune: *const f64) -> *mut ChimLyrics {
+    if text.is_null() {
+        return std::ptr::null_mut();
+    }
+    let tune = read_tune(tune);
+    let r = catch_unwind(|| {
+        let text = unsafe { CStr::from_ptr(text) }.to_string_lossy();
+        let body = BodyMix::new(fin(female, 0.0, 1.0, 0.0), 0.0);
+        chimera::phonetics::planner::init();
+        let words = |w: &str, reduce: bool| -> Vec<Segment> {
+            match sung_syllable(w) {
+                Some(p) => p.iter().map(|ipa| Segment { ipa: ipa.to_string(), stress: Some(1), ..Default::default() }).collect(),
+                None => g2p().word(w, reduce),
+            }
+        };
+        let syl: Vec<SylPlan> = lyrics_to_syllables(&text, &words)
+            .iter()
+            .filter(|s| s.melisma != Some(true)) // a melisma is a pitch change with the gate held: V/OCT does it
+            .map(|s| {
+                let on_raw = plan_on(s, body);
+                let (on_all, dip) = tune_on(on_raw, &tune);
+                // the vowel is the open-ended gesture group: it starts where the last gesture starts
+                let vowel_t0 = on_all.iter().filter(|g| g.targets.iter().any(|(k, _)| matches!(k, ControlKey::Artic(_)))).map(|g| g.t0).fold(0.0, f64::max);
+                let breath_t0 = on_all.iter().filter(|g| g.label_str() == "breath" && g.t1 > 1.0).map(|g| g.t0).fold(f64::INFINITY, f64::min).min(1.0);
+                let on: Vec<Gesture> = strip_pitch(on_all).into_iter().map(|g| g.tag(LYR_TAG)).collect();
+                let off_raw = plan_off(s, body);
+                let (off, mute_at) = tune_off(strip_pitch(off_raw), &tune);
+                let off_len = off.iter().map(|g| g.end()).fold(0.0, f64::max);
+                SylPlan { on, off, vowel_t0, breath_t0, off_len, mute_at, dip, text: s.text.clone() }
+            })
+            .collect();
+        if syl.is_empty() { std::ptr::null_mut() } else { Box::into_raw(Box::new(ChimLyrics { syl })) }
+    });
+    r.unwrap_or(std::ptr::null_mut())
+}
+
+/// Free lyrics made by `chim_lyrics_new`. No voice may still be singing from them: call
+/// `chim_set_lyrics(v, 0)` first. Off the audio thread.
+#[no_mangle]
+pub extern "C" fn chim_lyrics_free(l: *mut ChimLyrics) {
+    if !l.is_null() {
+        let _ = catch_unwind(AssertUnwindSafe(|| unsafe { drop(Box::from_raw(l)) }));
+    }
+}
+
+/// Number of syllables (0 for null).
+#[no_mangle]
+pub extern "C" fn chim_lyrics_len(l: *const ChimLyrics) -> usize {
+    if l.is_null() { 0 } else { unsafe { (*l).syl.len() } }
+}
+
+/// Copies the spelling of syllable `i` into `buf` (NUL-terminated, cut to `n` bytes). Not for the
+/// audio thread's use; reads only.
+#[no_mangle]
+pub extern "C" fn chim_lyrics_text(l: *const ChimLyrics, i: usize, buf: *mut c_char, n: usize) {
+    if l.is_null() || buf.is_null() || n == 0 {
+        return;
+    }
+    let l = unsafe { &*l };
+    let b = l.syl.get(i).map_or(&b""[..], |s| s.text.as_bytes());
+    let mut k = b.len().min(n - 1);
+    while k > 0 && k < b.len() && (b[k] & 0xC0) == 0x80 {
+        k -= 1; // not inside a UTF-8 character
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(b.as_ptr(), buf as *mut u8, k);
+        *buf.add(k) = 0;
+    }
+}
+
+/// Lyrics mode on or off. On: the gate sings syllables (`chim_note_on` / `chim_note_off`) and the
+/// vowel control has no effect while one sounds. Off: the score is cleared and the voice forgets
+/// the lyrics it sang from (they may then be freed). Real-time safe.
+#[no_mangle]
+pub extern "C" fn chim_set_lyrics(v: *mut ChimVoice, on: i32) {
+    if v.is_null() {
+        return;
+    }
+    let v = unsafe { &mut *v };
+    v.lyr_on = on != 0;
+    v.lyr = std::ptr::null();
+    v.lyr_held = None;
+    v.lyr_pending_off = false;
+    v.lyr_tail_end = 0.0;
+    v.lyr_mute_at = f64::INFINITY;
+    v.lyr_unmute_at = f64::INFINITY;
+    // Consonant bursts are 3 to 4 times the level of a vowel: with lyrics the engine's own
+    // limiter holds them, as it does in the engine's app (examples/sing.rs, RAW and LIM).
+    v.engine.voice_mut().limiter = v.lyr_on && v.tune[T_LIMITER] >= 0.5;
+    if !v.dead && catch_unwind(AssertUnwindSafe(|| v.engine.stop_speech())).is_err() {
+        v.dead = true;
+    }
+}
+
+/// The tunable values (`TUNE_N` doubles, null = defaults). The ones that shape a syllable's plan
+/// go to `chim_lyrics_new`; this sets the ones that act while the voice runs. Real-time safe.
+#[no_mangle]
+pub extern "C" fn chim_set_tune(v: *mut ChimVoice, tune: *const f64) {
+    if v.is_null() {
+        return;
+    }
+    let v = unsafe { &mut *v };
+    v.tune = read_tune(tune);
+    if v.lyr_on {
+        v.engine.voice_mut().limiter = v.tune[T_LIMITER] >= 0.5;
+    }
+}
+
+/// Writes the default tunable values (`TUNE_N` doubles).
+#[no_mangle]
+pub extern "C" fn chim_tune_default(out: *mut f64) {
+    if !out.is_null() {
+        unsafe { std::slice::from_raw_parts_mut(out, TUNE_N) }.copy_from_slice(&TUNE_DEFAULT);
+    }
+}
+
+/// 1 when no syllable is held: the voice then reads nothing from its lyrics, so other lyrics
+/// may be handed to it with the next `chim_note_on` and the old ones freed. Real-time safe.
+#[no_mangle]
+pub extern "C" fn chim_lyrics_idle(v: *const ChimVoice) -> i32 {
+    if v.is_null() {
+        return 1;
+    }
+    (unsafe { &*v }).lyr_held.is_none() as i32
+}
+
+impl ChimVoice {
+    /// The held syllable ends: its vowel is released and its glide and coda are sung.
+    fn lyr_off(&mut self) {
+        self.lyr_pending_off = false;
+        let Some(i) = self.lyr_held.take() else { return };
+        self.engine.release(LYR_TAG);
+        if self.lyr.is_null() {
+            return;
+        }
+        let Some(s) = (unsafe { &*self.lyr }).syl.get(i) else { return };
+        let at = self.engine.schedule(&s.off, 0.0, false);
+        self.lyr_tail_end = at + s.off_len;
+        self.lyr_mute_at = s.mute_at.map_or(f64::INFINITY, |t| at + t);
+        self.lyr_unmute_at = f64::INFINITY;
+    }
+}
+
+/// Gate opened: sing syllable `i` of `l` (after the coda of the one before, if that is still
+/// sounding). `l` must stay alive until `chim_set_lyrics(v, 0)`. Real-time safe.
+#[no_mangle]
+pub extern "C" fn chim_note_on(v: *mut ChimVoice, l: *const ChimLyrics, i: usize) {
+    if v.is_null() || l.is_null() {
+        return;
+    }
+    let v = unsafe { &mut *v };
+    if v.dead || !v.lyr_on {
+        return;
+    }
+    let r = catch_unwind(AssertUnwindSafe(|| {
+        v.lyr_off();
+        v.lyr = l;
+        let Some(s) = (unsafe { &*l }).syl.get(i) else { return };
+        let lead = (v.lyr_tail_end - v.engine.clock()).max(0.0) * v.tune[T_NEXT_WAIT].clamp(0.0, 3.0);
+        let at = v.engine.schedule(&s.on, lead, false);
+        v.lyr_held = Some(i);
+        v.lyr_unmute_at = at;
+        v.lyr_start = at + s.breath_t0;
+        v.lyr_dip = s.dip.map_or((0.0, 0.0), |(a, b)| (at + a, at + b));
+        v.lyr_vowel_ready = at + s.vowel_t0 + v.tune[T_MIN_VOWEL].clamp(0.0, 1000.0) * 0.001;
+    }));
+    if r.is_err() {
+        v.dead = true;
+    }
+}
+
+/// Gate closed: end the syllable (at once, or as soon as its vowel has sounded). Real-time safe.
+#[no_mangle]
+pub extern "C" fn chim_note_off(v: *mut ChimVoice) {
+    if v.is_null() {
+        return;
+    }
+    let v = unsafe { &mut *v };
+    if v.dead || v.lyr_held.is_none() {
+        return;
+    }
+    if v.engine.clock() < v.lyr_vowel_ready {
+        v.lyr_pending_off = true;
+    } else if catch_unwind(AssertUnwindSafe(|| v.lyr_off())).is_err() {
+        v.dead = true;
+    }
 }
 
 /// The tract radiates the time derivative of the flow, so a real glottal flow falls by 12 dB per
@@ -290,7 +779,7 @@ pub extern "C" fn chim_new(sample_rate: f64, female: f64, child: f64) -> *mut Ch
         let mut warm = [0f32; 256];
         engine.render(&mut warm);
         let noise_base = engine.voice().airway.noise_gain.glottis;
-        Box::into_raw(Box::new(ChimVoice { engine, vowels, velum_max, noise_base, female, fs, leveling: true, gain_target: 1.0, gain_coef: 1.0, gain: 1.0, ext_mix: 0.0, ext_lp: 0.0, ext_gate_target: 0.0, ext_gate: 0.0, dead: false }))
+        Box::into_raw(Box::new(ChimVoice { engine, vowels, velum_max, noise_base, female, fs, leveling: true, gain_target: 1.0, gain_coef: 1.0, gain: 1.0, ext_mix: 0.0, ext_lp: 0.0, ext_gate_target: 0.0, ext_gate: 0.0, lyr_on: false, lyr: std::ptr::null(), lyr_held: None, lyr_pending_off: false, lyr_vowel_ready: 0.0, lyr_tail_end: 0.0, lyr_start: 0.0, lyr_dip: (0.0, 0.0), lyr_mute_at: f64::INFINITY, lyr_unmute_at: f64::INFINITY, lyr_fade: 1.0, hp: [1.0, 0.0, 0.0, 0.0, 0.0], hp_z: [0.0; 2], hp_on: false, tune: TUNE_DEFAULT, lyr_level: 1.0, dbg_neutral: false, dead: false }))
     });
     r.unwrap_or(std::ptr::null_mut())
 }
@@ -333,11 +822,38 @@ pub extern "C" fn chim_set(v: *mut ChimVoice, p: *const ChimParams) {
             ..Default::default()
         };
         v.engine.voice_mut().fold_scale = 1.0 - v.ext_mix;
+        // `set_source` puts the glottal opening back to the knobs' value. The engine's score
+        // opens the glottis for voiceless consonants only on its own control tick (every 64
+        // samples), and this function runs more often, so without the restore an [s] or [f] was
+        // voiced for most of its length (the module sang "soh" as "like").
+        let score_abduction = v.engine.voice().glottis.params.abduction;
+        // The same for the vocal effort: the engine's control tick derives it from the pressure
+        // in use (zero while the breath starts), `set_source` from the full pressure. The
+        // value then jumped 750 times a second during every attack and release.
+        let effort = v.engine.voice().glottis.params.effort;
         v.engine.set_source(&src);
+        v.engine.voice_mut().glottis.params.effort = effort;
+        if v.lyr_on && v.engine.score().size() > 0 {
+            v.engine.voice_mut().glottis.params.abduction = score_abduction;
+        }
         v.engine.voice_mut().glottis.fry_pull = Some(fry_pull);
         // level correction follows the pitch the folds are sent to (after the fry pull), and
         // moves at the glide rate so it tracks the engine's own pitch glide
         let rate = f0 * (1.0 - fry_pull) + f0.min(48.0) * fry_pull;
+        // THUMP: a high-pass under the note's pitch takes the low pressure pulse of a stop
+        // release out of the output and leaves the voice (its lowest part is the pitch) alone.
+        let ratio = v.tune[T_THUMP];
+        let hp_on = v.lyr_on && ratio > 0.01;
+        if hp_on {
+            let w = std::f64::consts::TAU * (ratio.min(2.0) * rate).clamp(10.0, 2000.0) / v.fs;
+            let (sn, cs) = w.sin_cos();
+            let alpha = sn / std::f64::consts::SQRT_2; // Q = 0.707
+            let a0 = 1.0 + alpha;
+            v.hp = [((1.0 + cs) / 2.0 / a0) as f32, (-(1.0 + cs) / a0) as f32, ((1.0 + cs) / 2.0 / a0) as f32, (-2.0 * cs / a0) as f32, ((1.0 - alpha) / a0) as f32];
+        } else if v.hp_on {
+            v.hp_z = [0.0; 2];
+        }
+        v.hp_on = hp_on;
         let first = v.gain_coef >= 1.0;
         v.gain_target = if v.leveling {
             let (g_fold, g_ext) = (level_gain(rate, v.female, p.vowel), level_gain(EXT_REF_HZ, v.female, p.vowel));
@@ -345,6 +861,9 @@ pub extern "C" fn chim_set(v: *mut ChimVoice, p: *const ChimParams) {
         } else {
             1.0
         };
+        if v.lyr_on {
+            v.gain_target *= v.tune[T_LEVEL].clamp(0.0, 8.0) as f32;
+        }
         v.gain_coef = (1.0 - (-1.0 / (fin(p.glide, 0.002, 2.0, 0.06).max(0.02) * v.fs)).exp()) as f32;
         if first {
             v.gain = v.gain_target;
@@ -356,10 +875,24 @@ pub extern "C" fn chim_set(v: *mut ChimVoice, p: *const ChimParams) {
         // The male body's added noise is trimmed by 4 dB: with the full amount BREATHY raised
         // its level by 5-6 dB and drove the peaks into the soft clip (examples/breathlevel.rs).
         let added = (noise_k - 1.0) * (0.63 + 0.37 * v.female);
-        let noise = ((1.0 + added) / v.gain_target as f64).min(20.0);
+        // With lyrics the engine's own balance of noise and voice stays (as in its app): the
+        // division made the start of every voiced consonant 13 to 16 dB too bright (examples/lyrab.rs).
+        let noise = if v.lyr_on { 1.0 + added } else { ((1.0 + added) / v.gain_target as f64).min(20.0) };
         v.engine.voice_mut().airway.noise_gain.glottis = v.noise_base * noise;
         let x = fin(p.vowel, 0.0, 4.0, 2.0);
-        let mut a = blend_vowel(&v.vowels, x);
+        // With lyrics the plan's gestures move the mouth from the neutral position, as in the
+        // engine's speech. From the VOWEL control's vowel instead, the consonants were wrong
+        // ("tea" was "see", "do" was "to": a speech recognizer gave the right word 49 % of the
+        // time, 70 % from neutral; 20 words with stops).
+        let mut a = if v.lyr_on {
+            let mut n = ArticPatch::default();
+            for k in ArticKey::ALL {
+                n.set(k, NEUTRAL.get(k));
+            }
+            n
+        } else {
+            blend_vowel(&v.vowels, x)
+        };
         // the engine clamps every articulator to its physiological range (ARTIC_SPECS)
         let lx = a.get(ArticKey::Larynx).unwrap_or(0.0) + fin(p.larynx, -3.2, 3.2, 0.0);
         a.set(ArticKey::Larynx, lx);
@@ -368,9 +901,34 @@ pub extern "C" fn chim_set(v: *mut ChimVoice, p: *const ChimParams) {
         let cap = v.velum_max[j] + (t - j as f64) * (v.velum_max[j + 1] - v.velum_max[j]);
         a.set(ArticKey::Velum, fin(p.velum, -0.25, 1.4, -0.15).min(cap));
         a.set(ArticKey::Ventricular, fin(p.ventricular, 0.0, 1.0, 0.0));
+        if v.dbg_neutral {
+            a = ArticPatch::default();
+            for k in ArticKey::ALL {
+                a.set(k, NEUTRAL.get(k));
+            }
+        }
         v.engine.set_artic(&a, None);
-        v.engine.set_gate(fin(p.gate, 0.0, 1.5, 0.0));
-        v.ext_gate_target = fin(p.gate, 0.0, 1.0, 0.0);
+        let mut gate = fin(p.gate, 0.0, 1.5, 0.0);
+        if v.lyr_on {
+            // the breath lasts as long as the syllable does (a short gate still sings its vowel);
+            // after the note-off the score's own breath carries the coda
+            if v.lyr_pending_off && v.engine.clock() >= v.lyr_vowel_ready {
+                v.lyr_off();
+            }
+            if gate > 0.0 {
+                v.lyr_level = gate;
+            }
+            // A syllable that waits for the coda of the one before has its gestures later than
+            // its note-on. The breath waits too: with the gate open at once, the folds sang the
+            // base vowel in that time ("church church" had an "uh" before the second word).
+            let now = v.engine.clock();
+            gate = if v.lyr_held.is_some() && now >= v.lyr_start { v.lyr_level } else { 0.0 };
+            if now >= v.lyr_dip.0 && now < v.lyr_dip.1 {
+                gate *= v.tune[T_ONSET_BREATH].clamp(0.0, 1.0);
+            }
+        }
+        v.engine.set_gate(gate);
+        v.ext_gate_target = gate.min(1.0);
     }));
     if r.is_err() {
         v.dead = true;
@@ -399,9 +957,27 @@ pub extern "C" fn chim_render(v: *mut ChimVoice, out: *mut f32, n: usize) {
         v.dead = true;
         buf.fill(0.0);
     } else {
+        let now = v.engine.clock();
+        if now >= v.lyr_unmute_at {
+            v.lyr_mute_at = f64::INFINITY;
+            v.lyr_unmute_at = f64::INFINITY;
+        }
+        let fade_to = if now >= v.lyr_mute_at { 0.0 } else { 1.0 };
+        let fade_coef = (1.0 - (-1.0 / (v.tune[T_FADE_TIME].clamp(0.2, 500.0) * 0.001 * v.fs)).exp()) as f32;
+        if v.hp_on {
+            let [b0, b1, b2, a1, a2] = v.hp;
+            for s in buf.iter_mut() {
+                let x = *s;
+                let y = b0 * x + v.hp_z[0];
+                v.hp_z[0] = b1 * x - a1 * y + v.hp_z[1];
+                v.hp_z[1] = b2 * x - a2 * y;
+                *s = y;
+            }
+        }
         for s in buf.iter_mut() {
             v.gain += v.gain_coef * (v.gain_target - v.gain);
-            *s = soft_clip(*s * v.gain);
+            v.lyr_fade += fade_coef * (fade_to - v.lyr_fade);
+            *s = soft_clip(*s * v.gain) * v.lyr_fade;
         }
     }
 }
@@ -438,6 +1014,22 @@ pub extern "C" fn chim_velum_cap(v: *const ChimVoice, vowel: f64) -> f64 {
     let t = fin(vowel, 0.0, 4.0, 2.0) * VEL_STEPS as f64;
     let j = (t.floor() as usize).min(VEL_N - 2);
     v.velum_max[j] + (t - j as f64) * (v.velum_max[j + 1] - v.velum_max[j])
+}
+
+/// Test hook (examples/lyrab.rs): switches one of the wrapper's engine settings. 0 = velum junction,
+/// 1 = articulator settle, 2 = base posture neutral (the VOWEL, NASAL and LARYNX controls ignored).
+#[no_mangle]
+pub extern "C" fn chim_debug(v: *mut ChimVoice, what: i32, on: i32) {
+    if v.is_null() {
+        return;
+    }
+    let v = unsafe { &mut *v };
+    match what {
+        0 => v.engine.voice_mut().airway.tract.velum_junction = on != 0,
+        1 => v.engine.voice_mut().artic.settle = on != 0,
+        2 => v.dbg_neutral = on != 0,
+        _ => {}
+    }
 }
 
 /// 1 if the voice hit a panic or produced non-finite output (it then stays silent).
@@ -565,6 +1157,32 @@ mod alloc_test {
             }
             ARMED.store(false, Ordering::Relaxed);
             assert_eq!(COUNT.load(Ordering::Relaxed), 0, "audio path allocated (female={female})");
+            // lyrics mode: the syllables are planned ahead, singing them must not allocate
+            let text = std::ffi::CString::new("twinkle strengths, I wonder").unwrap();
+            let l = chim_lyrics_new(text.as_ptr(), female, std::ptr::null());
+            let n = chim_lyrics_len(l);
+            assert_eq!(n, 6, "syllables");
+            let mut peak = 0f32;
+            COUNT.store(0, Ordering::Relaxed);
+            ARMED.store(true, Ordering::Relaxed);
+            chim_set_lyrics(v, 1);
+            for k in 0..144000usize {
+                let on = (k / 6000) % 2 == 0 || k % 24000 == 6000; // long gates and a one-sample trigger
+                if k % 6000 == 0 || k % 24000 == 6001 {
+                    if on { chim_note_on(v, l, (k / 12000) % n) } else { chim_note_off(v) }
+                }
+                if k % 16 == 0 {
+                    p.gate = if on { 1.0 } else { 0.0 };
+                    chim_set(v, &p);
+                }
+                chim_render(v, &mut s, 1);
+                peak = peak.max(s.abs());
+            }
+            chim_set_lyrics(v, 0);
+            ARMED.store(false, Ordering::Relaxed);
+            assert_eq!(COUNT.load(Ordering::Relaxed), 0, "lyrics path allocated (female={female})");
+            assert!(peak > 0.05 && chim_is_dead(v) == 0, "lyrics sing (peak {peak})");
+            chim_lyrics_free(l);
             chim_free(v);
         }
     }

@@ -1,7 +1,10 @@
 #include "plugin.hpp"
 #include "chimera_rack.h"
+#include "panel.hpp"
+#include "PhonaLab.hpp"
 #include <atomic>
 #include <thread>
+#include <mutex>
 #include <chrono>
 
 // Prototype singing voice. One Chimera voice per module (monophonic).
@@ -30,7 +33,7 @@ struct Phona : Module {
 		VOCT_INPUT, GLIDE_INPUT, VIBDEPTH_INPUT, VIBRATE_INPUT,
 		VOWEL_INPUT, NASAL_INPUT, LARYNX_INPUT,
 		TENSION_INPUT, BRIGHT_INPUT, BREATHY_INPUT, ROUGH_INPUT, FRY_INPUT,
-		GATE_INPUT, EFFORT_INPUT, EXT_INPUT, SOURCE_INPUT, INPUTS_LEN
+		GATE_INPUT, EFFORT_INPUT, EXT_INPUT, SOURCE_INPUT, RESET_INPUT, INPUTS_LEN
 	};
 	enum OutputId { AUDIO_OUTPUT, OUTPUTS_LEN };
 	enum LightId { ENUMS(STATUS_LIGHT, 2), LIGHTS_LEN }; // green = sounding, red = fault
@@ -44,6 +47,34 @@ struct Phona : Module {
 		int body;
 		float rate;
 	};
+
+	// Lyrics turned into syllable plans, for one body. Built by the worker (it allocates), handed
+	// over like a voice. `l` is null for an empty text.
+	struct BuiltLyr {
+		ChimLyrics* l;
+		int body;
+		int n;
+		bool keep; // same text and body as the build before (only the Lab's values changed): the song goes on
+	};
+	std::mutex lyricsMutex;                // guards `lyrics` and `sylTexts` (UI and worker threads only)
+	std::string lyrics;
+	std::vector<std::string> sylTexts;     // spelling of each syllable, for the panel
+	std::atomic<int> lyricsVersion{0};
+	BuiltLyr* activeLyr = nullptr;         // owned by the audio thread
+	BuiltLyr* lyrPending = nullptr;        // taken from the worker, waits for the held syllable to end
+	// Tunable values (Phona Lab, an expander next to this module; defaults without it)
+	double tuneCur[CHIM_TUNE_N];           // audio thread
+	std::atomic<double> tuneShared[CHIM_TUNE_N]; // for the worker, which plans the syllables
+	std::atomic<int> tuneVersion{0};
+	std::atomic<BuiltLyr*> lyrIncoming{nullptr};
+	std::atomic<BuiltLyr*> lyrOutgoing{nullptr};
+	std::atomic<bool> lyricsShown{false};  // lyrics mode in use, for the panel
+	std::atomic<int> sylShown{0};          // syllable being sung
+	bool voiceLyr = false;                 // lyrics mode as last sent to the active voice
+	bool lyrGate = false;
+	int lyrDelay = 0;                      // samples until a gate that opened starts its syllable
+	int syl = 0;                           // next syllable
+	dsp::SchmittTrigger resetTrigger;
 
 	Built* active = nullptr;               // owned by the audio thread
 	std::atomic<Built*> incoming{nullptr}; // published by worker, taken by audio thread
@@ -68,6 +99,8 @@ struct Phona : Module {
 
 	Phona() {
 		config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
+		chim_tune_default(tuneCur);
+		for (int i = 0; i < CHIM_TUNE_N; i++) tuneShared[i] = tuneCur[i];
 		configParam(PITCH_PARAM, -36.f, 36.f, -12.f, "Pitch", " Hz", dsp::FREQ_SEMITONE, dsp::FREQ_C4);
 		getParamQuantity(PITCH_PARAM)->snapEnabled = true; // semitone steps; FINE covers the gaps
 		configParam(FINE_PARAM, -1.f, 1.f, 0.f, "Fine tune", " cents", 0.f, 100.f);
@@ -106,6 +139,7 @@ struct Phona : Module {
 		const char* cvNames[] = {nullptr, "Glide", "Vibrato depth", "Vibrato rate", "Vowel", "Nasal", "Larynx", "Tension", "Brightness", "Breathiness", "Roughness", "Fry"};
 		for (int i = GLIDE_INPUT; i <= FRY_INPUT; i++)
 			configInput(i, std::string(cvNames[i]) + " CV (10V = full knob range)");
+		configInput(RESET_INPUT, "Reset (lyrics start again at the first syllable)");
 		configOutput(AUDIO_OUTPUT, "Voice");
 		worker = std::thread([this] { work(); });
 	}
@@ -116,6 +150,50 @@ struct Phona : Module {
 		destroy(active);
 		destroy(incoming.exchange(nullptr));
 		destroy(outgoing.exchange(nullptr));
+		destroyLyr(activeLyr);
+		destroyLyr(lyrPending);
+		destroyLyr(lyrIncoming.exchange(nullptr));
+		destroyLyr(lyrOutgoing.exchange(nullptr));
+	}
+
+	static void destroyLyr(BuiltLyr* b) {
+		if (!b) return;
+		chim_lyrics_free(b->l);
+		delete b;
+	}
+
+	// UI thread: new lyrics text. The worker turns it into syllables.
+	void setLyrics(const std::string& text) {
+		{
+			std::lock_guard<std::mutex> lock(lyricsMutex);
+			if (text == lyrics) return;
+			lyrics = text;
+		}
+		lyricsVersion++;
+	}
+	std::string getLyrics() {
+		std::lock_guard<std::mutex> lock(lyricsMutex);
+		return lyrics;
+	}
+	// UI thread: spelling of the syllable being sung ("" when there is none)
+	std::string shownSyllable() {
+		std::lock_guard<std::mutex> lock(lyricsMutex);
+		int i = sylShown;
+		return i >= 0 && i < (int) sylTexts.size() ? sylTexts[i] : "";
+	}
+
+	json_t* dataToJson() override {
+		json_t* root = json_object();
+		json_object_set_new(root, "lyrics", json_string(getLyrics().c_str()));
+		return root;
+	}
+	void dataFromJson(json_t* root) override {
+		json_t* l = json_object_get(root, "lyrics");
+		if (l && json_is_string(l)) setLyrics(json_string_value(l));
+	}
+	void onReset(const ResetEvent& e) override {
+		Module::onReset(e);
+		setLyrics("");
 	}
 
 	static void destroy(Built* b) {
@@ -129,9 +207,46 @@ struct Phona : Module {
 		int builtBody = -1;
 		float builtRate = 0.f;
 		int backoff = 0;
+		int builtLyrVersion = -1, builtLyrBody = -1, builtTune = 0;
 		while (running) {
 			destroy(outgoing.exchange(nullptr));
+			destroyLyr(lyrOutgoing.exchange(nullptr));
 			int b = desiredBody.load();
+			// lyrics: the syllable plans depend on the text and on the body
+			int lv = lyricsVersion.load();
+			int tv = tuneVersion.load();
+			if (lv != builtLyrVersion || b != builtLyrBody || tv != builtTune) {
+				std::string text;
+				{
+					std::lock_guard<std::mutex> lock(lyricsMutex);
+					text = lyrics;
+				}
+				double tune[CHIM_TUNE_N];
+				for (int i = 0; i < CHIM_TUNE_N; i++) tune[i] = tuneShared[i].load();
+				ChimLyrics* l = text.empty() ? nullptr : chim_lyrics_new(text.c_str(), b == 1 ? 1.0 : 0.0, tune);
+				int n = (int) chim_lyrics_len(l);
+				std::vector<std::string> texts;
+				for (int i = 0; i < n; i++) {
+					char buf[32];
+					chim_lyrics_text(l, i, buf, sizeof(buf));
+					texts.push_back(buf);
+				}
+				{
+					std::lock_guard<std::mutex> lock(lyricsMutex);
+					sylTexts = texts;
+				}
+				bool keep = lv == builtLyrVersion && b == builtLyrBody;
+				BuiltLyr* fresh = new BuiltLyr{l, b, n, keep};
+				// a stale unclaimed build is dropped (if it had new text, this one stands in for it)
+				if (BuiltLyr* stale = lyrIncoming.exchange(nullptr)) {
+					fresh->keep = keep && stale->keep;
+					destroyLyr(stale);
+				}
+				destroyLyr(lyrIncoming.exchange(fresh));
+				builtTune = tv;
+				builtLyrVersion = lv;
+				builtLyrBody = b;
+			}
 			float r = desiredRate.load();
 			// the active voice died: build a replacement, but not more often than once per second
 			if (rebuildRequest.exchange(false)) {
@@ -184,6 +299,7 @@ struct Phona : Module {
 				if (n->body == b && n->rate == args.sampleRate) {
 					outgoing.store(active);
 					active = n;
+					voiceLyr = false; // a new voice starts in plain mode
 					ctrl = 0;
 					idle = false;
 					dead = false;
@@ -204,10 +320,78 @@ struct Phona : Module {
 		}
 		ChimVoice* voice = active->voice;
 
+		// New lyrics. With new text the voice must drop its pointer to the old ones before the
+		// worker frees them. With the same text (a Lab value changed) the song goes on: the new
+		// plans wait until no syllable is held, because only then does the voice read nothing
+		// from the old ones.
+		if (lyrOutgoing.load() == nullptr) {
+			if (!lyrPending) {
+				lyrPending = lyrIncoming.exchange(nullptr);
+			}
+			else if (BuiltLyr* n = lyrIncoming.exchange(nullptr)) {
+				n->keep = n->keep && lyrPending->keep;
+				lyrOutgoing.store(lyrPending); // a newer build replaces the one that waited
+				lyrPending = n;
+			}
+		}
+		if (lyrPending && lyrOutgoing.load() == nullptr && (!lyrPending->keep || chim_lyrics_idle(voice))) {
+			if (!lyrPending->keep) {
+				chim_set_lyrics(voice, 0);
+				voiceLyr = false;
+				syl = 0;
+			}
+			lyrOutgoing.store(activeLyr);
+			activeLyr = lyrPending;
+			lyrPending = nullptr;
+		}
+		// Lyrics mode needs syllables planned for this voice's body (after a BODY change the two
+		// arrive separately; the plain voice sounds in between).
+		bool wantLyr = activeLyr && activeLyr->l && activeLyr->n > 0 && activeLyr->body == active->body;
+		if (wantLyr != voiceLyr) {
+			chim_set_lyrics(voice, wantLyr ? 1 : 0);
+			voiceLyr = wantLyr;
+			lyrGate = false;
+			lyrDelay = 0;
+		}
+		lyricsShown = wantLyr;
+		if (resetTrigger.process(inputs[RESET_INPUT].getVoltage(), 0.1f, 1.f)) syl = 0;
+
 		float gate = 1.f;
 		if (inputs[GATE_INPUT].isConnected()) {
 			float gv = inputs[GATE_INPUT].getVoltage();
 			gate = gv >= GATE_THRESHOLD ? clamp(gv / 10.f, 0.f, 1.f) : 0.f;
+		}
+		// Lyrics: each time the gate opens, the next syllable is sung; when it closes, the syllable
+		// ends (the Rust side keeps a trigger-length gate open until the vowel has sounded).
+		if (wantLyr) {
+			bool open = gate > 0.f;
+			// The syllable starts 1 ms after the gate opens. A reset that comes with the gate can
+			// arrive some samples late (each cable adds one); without the wait, the gate would sing
+			// the old position, then the reset would make the next gate sing syllable 1 again.
+			if (open && !lyrGate) lyrDelay = std::max(1, (int) (args.sampleRate * 0.001f));
+			if (lyrDelay > 0 && --lyrDelay == 0) {
+				// Plans with new Lab values that still wait (with long consonants a syllable can
+				// be held until the next one starts, so the voice is never idle): a note-on ends
+				// the held syllable from the old plans first, so this is the other safe moment.
+				if (lyrPending && lyrPending->keep && lyrPending->l && lyrPending->n > 0 && lyrPending->body == active->body && lyrOutgoing.load() == nullptr) {
+					if (syl >= lyrPending->n) syl = 0;
+					chim_note_on(voice, lyrPending->l, syl); // reads the old plans for the last time
+					lyrOutgoing.store(activeLyr);
+					activeLyr = lyrPending;
+					lyrPending = nullptr;
+				}
+				else {
+					if (syl >= activeLyr->n) syl = 0;
+					chim_note_on(voice, activeLyr->l, syl);
+				}
+				sylShown = syl;
+				syl = (syl + 1) % activeLyr->n;
+				if (!open) chim_note_off(voice);
+			}
+			else if (!open && lyrGate && lyrDelay == 0) {
+				chim_note_off(voice);
+			}
+			lyrGate = open;
 		}
 		// The engine samples its gate once per 64 output samples, so a short trigger could vanish:
 		// hold an onset open for 128 samples (and send it right away).
@@ -249,6 +433,21 @@ struct Phona : Module {
 			if (!inputs[EXT_INPUT].isConnected()) source = 0.f;
 			sourceShown = source;
 			chim_set_ext(voice, source);
+			// Phona Lab next to this module: its knobs are the tunable values. The ones that shape
+			// a syllable's plan go to the worker, the others to the voice.
+			Module* lab = nullptr;
+			if (rightExpander.module && rightExpander.module->model == modelPhonaLab) lab = rightExpander.module;
+			else if (leftExpander.module && leftExpander.module->model == modelPhonaLab) lab = leftExpander.module;
+			bool replan = false;
+			for (int i = 0; i < CHIM_TUNE_N; i++) {
+				double x = lab ? (double) lab->params[i].getValue() : PhonaLab::spec(i).def;
+				if (x == tuneCur[i]) continue;
+				tuneCur[i] = x;
+				tuneShared[i] = x;
+				if (PhonaLab::spec(i).plan) replan = true;
+			}
+			if (replan) tuneVersion++;
+			chim_set_tune(voice, tuneCur);
 			chim_set(voice, &p);
 			// a dead voice stays silent: show the fault and ask the worker for a new voice (once)
 			dead = chim_is_dead(voice) != 0;
@@ -279,38 +478,6 @@ struct Phona : Module {
 		bool fault = dead || buildFailed;
 		lights[STATUS_LIGHT + 0].setBrightnessSmooth(idle || fault ? 0.f : 1.f, args.sampleTime);
 		lights[STATUS_LIGHT + 1].setBrightnessSmooth(fault ? 1.f : 0.f, args.sampleTime);
-	}
-};
-
-// Panel colours. The same values are in tools/panel.py, which writes res/Phona.svg.
-static const NVGcolor INK = nvgRGB(0x24, 0x21, 0x1d);
-static const NVGcolor AMBER = nvgRGB(0xd9, 0x8a, 0x1f);
-static const NVGcolor MOD_BLUE = nvgRGB(0x1f, 0x7a, 0xd9);
-static const NVGcolor CARD_BODY = nvgRGB(0xec, 0xe7, 0xdd);
-static const NVGcolor CARD_HEAD = nvgRGB(0xd8, 0xd0, 0xc1);
-
-static std::shared_ptr<window::Font> panelFont() {
-	return APP->window->loadFont(asset::system("res/fonts/Nunito-Bold.ttf"));
-}
-
-// Panel text (Rack's SVG reader has no text, so the widget draws it).
-struct PanelLabel : TransparentWidget {
-	std::string text;
-	float size;
-	NVGcolor color = INK;
-	int align = NVG_ALIGN_CENTER;
-	float spacing = 0.3f;
-	PanelLabel(Vec pos, std::string t, float s = 7.f) : text(t), size(s) { box.pos = pos; box.size = Vec(0, 0); }
-	void draw(const DrawArgs& args) override {
-		std::shared_ptr<window::Font> font = panelFont();
-		if (!font) return;
-		nvgFontFaceId(args.vg, font->handle);
-		nvgFontSize(args.vg, size);
-		nvgTextAlign(args.vg, align | NVG_ALIGN_MIDDLE);
-		nvgFillColor(args.vg, color);
-		nvgTextLetterSpacing(args.vg, spacing);
-		nvgText(args.vg, 0, 0, text.c_str(), NULL);
-		nvgTextLetterSpacing(args.vg, 0.f);
 	}
 };
 
@@ -352,18 +519,28 @@ struct ValueDisplay : TransparentWidget {
 		bool live = module && input >= 0 && module->inputs[input].isConnected();
 		if (live) v = module->modShown[param];
 		bool dark = kind == R_VOWEL;
-		nvgBeginPath(args.vg);
-		nvgRoundedRect(args.vg, 0, 0, box.size.x, box.size.y, box.size.y / 2.f);
-		nvgFillColor(args.vg, dark ? INK : CARD_HEAD);
-		nvgFill(args.vg);
+		std::string text = readoutText(kind, v);
+		// with lyrics, the vowel plate shows the syllable being sung (the VOWEL knob has no effect)
+		bool sung = dark && module && module->lyricsShown;
+		if (sung) {
+			text = module->shownSyllable();
+			live = false;
+		}
 		std::shared_ptr<window::Font> font = panelFont();
 		if (!font) return;
 		nvgFontFaceId(args.vg, font->handle);
 		nvgFontSize(args.vg, dark ? 7.5f : 6.3f);
+		// the plate grows with a long syllable
+		float w = box.size.x;
+		if (sung) w = std::max(w, nvgTextBounds(args.vg, 0, 0, text.c_str(), NULL, NULL) + 9.f);
+		nvgBeginPath(args.vg);
+		nvgRoundedRect(args.vg, (box.size.x - w) / 2.f, 0, w, box.size.y, box.size.y / 2.f);
+		nvgFillColor(args.vg, dark ? INK : CARD_HEAD);
+		nvgFill(args.vg);
 		nvgTextAlign(args.vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
 		if (live) nvgFillColor(args.vg, dark ? nvgRGB(0x6c, 0xb4, 0xf5) : nvgRGB(0x16, 0x5c, 0xa8));
 		else nvgFillColor(args.vg, dark ? nvgRGB(0xf0, 0xa8, 0x3c) : INK);
-		nvgText(args.vg, box.size.x / 2.f, box.size.y / 2.f + 0.3f, readoutText(kind, v).c_str(), NULL);
+		nvgText(args.vg, box.size.x / 2.f, box.size.y / 2.f + 0.3f, text.c_str(), NULL);
 	}
 };
 
@@ -470,6 +647,8 @@ struct PhonaWidget : ModuleWidget {
 		addChild(new PanelLabel(mm2px(Vec(x, y)), text));
 	}
 
+	void appendContextMenu(Menu* menu) override;
+
 	PhonaWidget(Phona* module) {
 		setModule(module);
 		setPanel(createPanel(asset::plugin(pluginInstance, "res/Phona.svg")));
@@ -560,8 +739,12 @@ struct PhonaWidget : ModuleWidget {
 		addParam(createParamCentered<CKSS>(mm2px(Vec(bx, y1 + midY)), module, Phona::BODY_PARAM));
 		addLabel(bx + 5.f, y1 + midY - 2.6f, "F"); // CKSS: up = 1 = female
 		addLabel(bx + 5.f, y1 + midY + 2.6f, "M");
-		addLabel(cellX(3, 5, 1), y3 + LABEL_Y, "GATE");
-		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(cellX(3, 5, 1), y3 + midY)), module, Phona::GATE_INPUT));
+		// GATE and RESET (lyrics) share a cell
+		float gx = cellX(3, 5, 1);
+		addLabel(gx - 4.7f, y3 + midY - 6.6f, "GATE");
+		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(gx - 4.7f, y3 + midY)), module, Phona::GATE_INPUT));
+		addLabel(gx + 4.7f, y3 + midY - 6.6f, "RESET");
+		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(gx + 4.7f, y3 + midY)), module, Phona::RESET_INPUT));
 		addLabel(cellX(3, 5, 2), y3 + LABEL_Y, "EXT IN");
 		addInput(createInputCentered<PJ301MPort>(mm2px(Vec(cellX(3, 5, 2), y3 + midY)), module, Phona::EXT_INPUT));
 		addLabel(cellX(3, 5, 4), y3 + LABEL_Y, "OUT");
@@ -581,5 +764,30 @@ struct PhonaWidget : ModuleWidget {
 		addDim(module, 3, sx - w / 2.f + 0.2f, sx + w / 2.f - 0.2f, true);
 	}
 };
+
+// The lyrics text, in the module's menu. Each change goes to the module, which plans the syllables
+// on its worker thread.
+struct LyricsField : ui::TextField {
+	Phona* module = nullptr;
+	LyricsField() {
+		box.size.x = 320.f;
+		placeholder = "Type words (a-gain splits syllables)";
+	}
+	void onChange(const ChangeEvent& e) override {
+		if (module) module->setLyrics(getText());
+	}
+};
+
+void PhonaWidget::appendContextMenu(Menu* menu) {
+	Phona* module = getModule<Phona>();
+	if (!module) return;
+	menu->addChild(new MenuSeparator);
+	menu->addChild(createMenuLabel("Lyrics: each gate sings the next syllable"));
+	LyricsField* field = new LyricsField;
+	field->module = module;
+	field->setText(module->getLyrics());
+	menu->addChild(field);
+	menu->addChild(createMenuItem("Clear lyrics", "", [=]() { module->setLyrics(""); }));
+}
 
 Model* modelPhona = createModel<Phona, PhonaWidget>("Phona");

@@ -18,6 +18,12 @@
       "name": "Phona",
       "description": "Physical-model singing voice: vocal folds and vocal tract, with an external input (talk box)",
       "tags": ["Oscillator", "Voltage-controlled oscillator"]
+    },
+    {
+      "slug": "PhonaLab",
+      "name": "Phona Lab",
+      "description": "Tuning tool for Phona's sung consonants: put it next to a Phona, turn the knobs, copy the values",
+      "tags": ["Utility", "Expander"]
     }
   ]
 }

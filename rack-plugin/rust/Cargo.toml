@@ -10,6 +10,7 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 chimera = { path = "../../engine/crates/chimera" }
+flate2 = "1" # the pronouncing dictionary is embedded gzipped
 
 [profile.release]
 opt-level = 3

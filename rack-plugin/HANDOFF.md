@@ -11,7 +11,7 @@ One module, **Phona** (plugin slug `Phona`, brand "Phona"), wraps
 VCV Rack Pro 2.6.6 on macOS arm64. Real-time modulation works, and that was the go/no-go condition.
 
 Scope the user wants: **male singing, female singing, beatboxing**. Vibrato is required.
-Speech, creatures and consonant sequencing are deprioritized.
+Speech and creatures are deprioritized. Words (lyrics mode, see "Lyrics mode") were added on 2026-11-10.
 
 ## Names (changed 2026-11-10)
 
@@ -27,7 +27,203 @@ with the old slugs do not find the new module. The engine and the Rust wrapper k
 source paths in the Rust build (`--remap-path-prefix`) for the same reason. Check with
 `zstd -dc share/*.vcvplugin | strings | grep -i <user name>` (must find nothing). The public author name is the
 user's forum handle, Spunoza (`plugin.json`, `LICENSE`); `LICENSE` also carries the engine's MIT notice
-(Jameson Hodge), which must ship with every build. Only mac-arm64 exists so far.
+(Jameson Hodge), which must ship with every build; so must `LICENSE-CMUDICT.txt` (the licence of the CMU
+Pronouncing Dictionary, embedded since lyrics mode; the Makefile's `LICENSE*` wildcard packs it). Only mac-arm64
+exists so far.
+
+## Lyrics mode (branch `lyrics`, 2026-11-10, not committed)
+
+Why: the user compared Phona with the engine's web app (https://chimera-vocal-synth.vercel.app/), which sings
+words. The app's word layer (phonetics: dictionary, consonants, live note-on/off planners in the engine's
+`phonetics/sing.rs`) was already linked but unused. No engine change was needed.
+
+What it does: the module's right-click menu has a Lyrics text field (and "Clear lyrics"). With text in it, each
+rising edge of GATE sings the next syllable: the onset consonants, then the vowel held while the gate is high.
+The falling edge sings the diphthong glide and the coda. The syllables wrap around. The RESET input (in the GATE
+cell, `RESET_INPUT`, appended last in `InputId`) goes back to the first syllable. A hyphen in the text splits
+syllables. Pitch stays with V/OCT, GLIDE and the vibrato knobs: the F0 and vibrato channels are removed from the
+planned gestures (`strip_pitch`). The VOWEL knob has no effect while lyrics are on; the vowel plate shows the
+syllable being sung. Empty text = the plain voice. The text is saved in the patch (`dataToJson` key `"lyrics"`);
+module Initialize clears it.
+
+Rust side: `chim_lyrics_new(text, female)` (allocates; worker thread) plans every syllable ahead into
+`SylPlan { on, off, vowel_t0, off_len, text }` using `lyrics_to_syllables`, `plan_note_on` and `plan_note_off`.
+Melisma tokens are dropped (a pitch change with the gate held does the same). `chim_set_lyrics(v, on)`,
+`chim_note_on(v, l, i)` and `chim_note_off(v)` are real-time safe (the engine's score has fixed capacity; the
+alloc test in lib.rs covers the lyrics path). A gate shorter than the onset plus `LYR_MIN_VOWEL` (70 ms) is held
+by the wrapper until the vowel has sounded (`lyr_pending_off`). A new onset waits for the previous coda
+(`lyr_tail_end`).
+
+Dictionary: the CMU Pronouncing Dictionary from the engine (`engine/public/data/cmudict.txt.gz`) is embedded with
+`include_bytes!` and unpacked with `flate2` on first use (worker thread). The plugin binary grew from about 2.4 MB
+to 3.6 MB. English only.
+
+Levels: consonant bursts are 3 to 4 times a vowel's level in the raw engine (`examples/sing.rs` with env `RAW=1`).
+In lyrics mode the engine's own limiter is turned on (as in the app; `chim_set_lyrics` does it), and
+`LYR_MAKEUP` = 1.6 gives back part of the level, because sung words came out about 8 dB under the plain voice.
+These values were set from measurements only; nobody has listened yet.
+
+Threading in `Phona.cpp`: `BuiltLyr` is handed over like a voice (atomic `lyrIncoming` / `lyrOutgoing`). Before the
+audio thread takes new lyrics it calls `chim_set_lyrics(voice, 0)`, so the voice drops its pointer to the old ones.
+Lyrics are planned per body, so after a BODY change the plain voice sounds until the matching lyrics arrive.
+`lyricsMutex` guards the text and the syllable spellings; only the UI and worker threads lock it.
+
+Timing limit: the vowel starts after the onset consonants, so it is late by the onset's length. The app's Sing
+page knows the song ahead and puts consonants before the beat; a Rack module cannot.
+
+Tests: `cargo test --release -- --test-threads=1` passes (5 tests). `cargo run --release --example sing -- <dir>`
+writes test WAVs (male and female, four texts; env `RAW=1` = no level correction, `LIM=1` = limiter). A harness
+outside the repo ran the real module for 30 s with gates, a reset, a body change and two lyric changes under
+load: no fault, about 8.5% CPU of one core (continuous, not Rack's meter).
+
+Not done: listening check by the user; no on-panel text editor (menu only); the VOWEL cell is not greyed out in
+lyrics mode; no CV selection of syllable.
+
+Observed, not changed: in the plain voice with default settings and gated notes at C3, the harness measured peaks
+at the 10 V soft-clip ceiling.
+
+
+### Faults found in the first listening test (2026-11-10), all in `rust/src/lib.rs`
+
+The user typed "doh ray mee fah soh lah tee doh" and heard "note", "gvay", "like", "neat". `examples/lyrab.rs`
+renders the same words through the engine as its app drives it (A) and through the wrapper (B); the faults
+were found by comparing the two.
+
+1. **Voiceless consonants were voiced.** `chim_set` runs every 16 samples and calls `set_source`, which puts
+   the glottal abduction back to the knobs' value. The score opens the glottis for [s], [f], [t] only on the
+   engine's control tick (every 64 samples). Fix: with lyrics, the abduction is saved and restored around
+   `set_source`. Low-band level during [f s t] fell by 10 to 12 dB, to the app path's level.
+2. **A click at every note start, also in the plain voice.** The same clash on the glottis `effort` value:
+   the engine derives it from the pressure in use (zero while the breath starts), `set_source` from the full
+   pressure, so it jumped 750 times a second during attacks and releases. Fix: `effort` is always saved and
+   restored. This also changes the plain voice: gated notes at C3 peaked at the 10 V clip ceiling, now 3 to 4 V.
+   The GitHub release v2.1.0 still has the click.
+3. **Stops became nasals with NASAL raised** ([t] to [n]). The engine leaves the velum to the performer except
+   for nasals. Fix: `strip_pitch` adds a closed velum to every non-nasal consonant's main gesture.
+4. **"fah", "soh", "lah" were mispronounced** by the spelling rules. `sung_syllable` gives fixed phonemes for
+   common singing syllables (doh ray mee fah sol lah tee, ah, ooh, da, ba, na, ...).
+5. With lyrics, the breath noise is no longer divided by the level gain (the engine's own balance, as in the app).
+
+`chim_debug` is a test hook for `examples/lyrab.rs`. `examples/phones.rs` prints phonemes (and gestures with
+`GEST=1`); `examples/syls.rs` prints the syllable split. Not yet heard by the user after these fixes.
+
+### Reset that arrives after the gate (2026-11-10, `src/Phona.cpp`)
+
+The user's sequencer sent RESET and GATE together and heard "doh" twice. Each cable adds one sample, so the
+reset can arrive some samples after the gate: the gate sang the old position, then the reset set the next
+gate to syllable 1 again. Fix: the syllable starts 1 ms after the gate opens (`lyrDelay`), so a reset inside
+that time counts. Checked with a test that compiles `Phona.cpp` into a small program and prints
+`shownSyllable()`: reset 0, 2 and 30 samples late gives the correct order; 60 samples late (outside the
+window) shows the old fault.
+
+### Extra sound after a last consonant (2026-11-10, `rust/src/lib.rs`)
+
+The user heard a short blip after each syllable that ends in a consonant. Cause: the engine's planner opens
+the last consonant about 50 ms before the breath has gone (as in speech), and the open mouth sounds as a
+short vowel ("dum" = "dum-uh"; the level went up 4 to 6 dB at the end of [m]). The engine's app has it too,
+a little weaker. Tried and rejected: to hold the consonant closed for longer. The air caught behind the
+closure makes a pop of -21 to -35 dB (relative to the vowel at about -10) when it opens, even 0.5 s later
+and with a slow release. Fix: `coda_end` gives the time when the last consonant starts to open
+(`SylPlan::mute_at`); `chim_render` fades the output out there (4 ms) and back in when the next syllable
+starts (`lyr_mute_at`, `lyr_unmute_at`, `lyr_fade`). Voiceless stops (p, t, k, tʃ) keep their release.
+`examples/phones.rs` with `GEST=1` now prints the note-off gestures too.
+
+### Final voiceless stops too strong (2026-11-10, `rust/src/lib.rs`)
+
+The user: "pop comes out fine, but then there is this higher pitch blip afterward". Measured on the final
+[p]: a pressure pulse 0.55 of the vowel peak (0 to peak in less than 1 ms, 0.46 in the engine's app path),
+then about 25 ms of hiss near 6 kHz. Wider fold opening (abduction 0.4 to 1.0) changed nothing, so it is not
+voicing. `soften_release` sets the breath target of the note-off plan to `CODA_STOP_BREATH` (0.5) for
+syllables that end in p, t, k, tʃ. Not confirmed by ear that the hiss is the blip the user means.
+
+### Phona Lab: tuning module (2026-11-10)
+
+The user could still hear the blip after a last [p] and asked for a module with many parameters, to find the
+best values by ear and report them. **Phona Lab** (`src/PhonaLab.hpp`, `src/PhonaLab.cpp`, panel from
+`tools/panel_lab.py`, slug `PhonaLab`, 16 HP) is that tool. It has no audio and no cables. A Phona reads the
+knobs of a Lab directly beside it (left or right; `rightExpander.module->model == modelPhonaLab`), and uses
+the defaults when there is none. COPY (button and menu) puts all values on the clipboard as one line
+(`PhonaLab stopBreath=0.5 ...`); "Paste values" in the menu reads such a line. It is not meant for the public
+release: remove it from `plugin.json` and `plugin.cpp` (or keep it hidden) before a release, after the values
+found are made the defaults.
+
+- The 16 tunable values are `T_*` / `TUNE_DEFAULT` in `rust/src/lib.rs`; Lab param ids are the same indices,
+  and `PhonaLab::spec(i).def` must equal `TUNE_DEFAULT[i]`. Values that shape a syllable's plan (`tune_on`,
+  `tune_off`; `spec.plan`) go to `chim_lyrics_new(text, female, tune)`; the others (fade time, min vowel,
+  next wait, level, limiter) go to the voice with `chim_set_tune`. Null = defaults.
+- A change of a plan value makes the worker plan the lyrics again (`tuneVersion`). Such a build has
+  `keep = true`: the audio thread holds it in `lyrPending` and swaps it in without a reset of the syllable
+  position, when no syllable is held (`chim_lyrics_idle`) or at the next note-on (the note-on ends the held
+  syllable from the old plans first). A build with new text or body resets as before.
+- With default values the output is bit-identical to the build before (checked with `examples/lyrab.rs`;
+  env `TUNE="0=0.3,5=10"` sets values by index there).
+- `src/panel.hpp` now holds the panel colours, `panelFont` and `PanelLabel` for both widgets.
+- The limiter switch made no difference in the `lyrab` render (the limiter does not act at those levels).
+
+### "church" (2026-11-10, `rust/src/lib.rs`)
+
+The user: Phona "really struggled with church"; and a very low CUT on the Lab reduced the pop after a last
+[p] (the default is still OFF, until the user sends values). Two faults, found with `lyrab` on
+"church church":
+- A last [tʃ] was treated as a stop, so STOP BREATH halved the breath of its fricative part: 10 to 13 dB
+  less hiss than the app path. Now only p, t, k are stops there; [tʃ] and [dʒ] keep the full breath and the
+  output fades 20 ms after the fricative part ends (plus FADE START).
+- A syllable that waits for the coda of the one before (`lead` in `chim_note_on`) had its gate open from the
+  note-on, so the folds sang the base vowel until its gestures started: an "uh" before the word, 12 dB under
+  the vowel for up to 0.2 s. Now the breath waits for `lyr_start`.
+
+### The pop of a first p/t/k; Lab has 18 values (2026-11-10)
+
+The user: CUT at about 20 ms removes the pop after a last [p], but "something like a switch sound" stays,
+and nothing in the top row removes it. Measured on "pop pop" (`coda/gap.py` in the scratchpad: 5 ms peak
+levels between two syllables): with CUT at 20 ms or less the end of the word is silent. What stays is the
+**first [p] of the next word**: the same low pressure pulse, 51% of the vowel peak, about 75 ms after the gate.
+The Lab had no control for it. Two were added (param ids 16 and 17, at the end, so the order of the others
+stays; the panel order is `PhonaLab::cellParam`):
+- **BREATH** (third row, `T_ONSET_BREATH`, default 1): breath while a first p/t/k is closed. The engine
+  takes the higher of the gate and the score's breath (`gate_goal = max(gate_target, score_breath)` in
+  `human_voice.rs`), so a breath gesture alone does nothing during a held note: the wrapper also lowers the
+  gate for that time (`SylPlan::dip`, `lyr_dip`). 0.5: 39%; 0: 27%.
+- **THUMP CUT** (fourth row, `T_THUMP`, default 0 = off): 2-pole high-pass on the output at this share of
+  the note's pitch, lyrics mode only. 0.7: 29%. With BREATH 0.3: 20%.
+Also found: a small tick 5% of the vowel peak, mostly above 3 kHz, 66 ms after the gate-off of a last [p]
+(the first leak of the closure). CUT at 10 ms or less removes it; at 20 ms it stays.
+
+### Consonants judged by a speech recognizer; the sung plan rebuilt (2026-11-10, `rust/src/lib.rs`)
+
+The user cannot tune consonants by ear ("I can just tell when it doesn't sound like the word"),
+so a recognizer is the judge: `tools/word_judge.py` gives P(right word) among about 150 similar
+words (Whisper small.en, forced scoring). The macOS `say` voice scores 94 %. 20 words with
+stops and 10 others, at C3 and G3.
+
+| | stop words | other words |
+|---|---|---|
+| before | 14 %, 7 of 40 right | 64 %, 16 of 20 |
+| engine's speech path (`chimera render text`) | about 60 % | |
+| same words as one plan, flat pitch, 0.45 s vowel (`examples/sp.rs`) | 68 % | |
+| now | 66 %, 34 of 40 | 82 %, 19 of 20 |
+
+Lab knobs alone reached 40 % (ONSET LEN 1.5, STOP HISS 0.3, CODA LEN 2) and no further. The
+causes were in the plan, found by moving from the one-piece plan to the split one step by step:
+
+1. **The live planner puts gestures 45 ms in the past** (`LIVE_T0`, to save latency). The first
+   consonant starts half formed with the breath on: [p t k] were heard as [h]. Now `plan_on`
+   with `ON_T0 = 0.02` and `plan_off` with `OFF_T0 = -0.02` (41 % -> 67 % in the bare engine).
+   Cost: the vowel is about 65 ms later after the gate than before.
+2. **The gate must not open before the plan's breath** (`lyr_start = at + breath_t0`). With the
+   gate open 50 ms before the gestures the score was 2 %.
+3. **Consonants at their spoken length**, not 0.7 of it. Affricates keep 0.7 of the table
+   length (the duration rules halve them: "church" was "it").
+4. **Base mouth position is neutral with lyrics**, not the VOWEL control's vowel (49 % -> 70 %;
+   "tea" was "see", "do" was "to"). LARYNX, NASAL and FALSE FOLDS still apply.
+5. **Last [b d g] are handled as stops** (no output fade): the fade removed their release.
+
+ONSET LEN and CODA LEN in Lab now mean 1 = spoken length. Their default 1.0 is right.
+
+Still wrong: "pie" is "bye", "bed" is "bet", "cat" is weak, [s] and [sh] are close to each
+other. The engine's own speech path has the same faults, so they are in the engine's
+consonant targets, not in the wrapper. Not tested: the female body, two-consonant onsets,
+the user's ear.
 
 ## Layout
 
@@ -43,11 +239,12 @@ Chimera/
     plugin.json
     src/Phona.cpp          the module (C++ wrapper, panel, worker thread)
     res/Phona.svg          panel background (20HP); generated by tools/panel.py, do not edit by hand
+    LICENSE-CMUDICT.txt     licence of the embedded CMU dictionary (shipped in the package)
     engine-fork.patch       the fork's changes against 092b16ce; see "Engine fork"
     rust/                   Rust staticlib `chimera_rack` exposing a C ABI; depends on ../../engine
       chimera_rack.h        the C API
       src/lib.rs            implementation + tests
-      examples/ab.rs        A/B renders through the C API, autocorrelation pitch check
+      examples/ab.rs           A/B renders through the C API, autocorrelation pitch check
       examples/scan.rs      stability scan at every control extreme
       examples/nasal.rs     vowel x nasal level grid (silence check)
       examples/effort.rs    level against EFFORT (RMS dBFS per vowel/pitch)
@@ -61,6 +258,7 @@ Chimera/
                                arg 1 = body 0/1, arg 2 = a vowel prints the rays near the junction; env STOCK=1 = the engine's stock behaviour
       examples/nasalscan.rs    level (RMS dBFS, peak) against NASAL per vowel position and body, with the velum cap; flags dead voices
       examples/nasalsweep.rs   live sweep NASAL 0 to 1 to 0 at 9 vowel positions on both bodies: dead voices, largest sample jump (clicks), peaks
+      examples/sing.rs         lyrics mode offline: gates and pitches sung to a text, WAVs to the dir in arg 1; see "Lyrics mode"
       examples/bench.rs        CPU benchmark through the C API, per-sample calls as the module makes them; see "CPU optimisation"
   spike/rack-bench/         CPU benchmark in Rack-style per-sample calls
   spike/nasal-diag/         tract-geometry dump used to find the velum bug
@@ -81,7 +279,8 @@ git -C engine apply ../rack-plugin/engine-fork.patch
 
 **Engine fork**: `engine/` (branch `rack`) holds the changes; `rack-plugin/engine-fork.patch` is the tracked
 copy against 092b16ce, so regenerate it after any engine edit (`git -C engine diff 092b16ce > ../rack-plugin/...`).
-Git state (panel redesign of 2026-11-10 not committed: `Phona.cpp`, `Phona.svg`, `tools/`, this file): everything up to and including the external input is committed (outer repo branch `singer-controls`,
+Git state (lyrics mode on branch `lyrics` not committed: `lib.rs`, `chimera_rack.h`, `Phona.cpp`, `Cargo.*`,
+`examples/sing.rs`, `LICENSE-CMUDICT.txt`; panel redesign of 2026-11-10 not committed: `Phona.cpp`, `Phona.svg`, `tools/`, this file): everything up to and including the external input is committed (outer repo branch `singer-controls`,
 commit ec704b8; engine branch `rack`, commit 51608fe). The nasal fix (`velum_junction`), the grey-out of
 fold-only controls and the CPU changes (see "CPU optimisation") are committed. The five host changes
 below leave default behaviour bit-identical (the engine's own suite passes, 83 tests, no failures, no re-bless):
@@ -114,7 +313,7 @@ cd rust
 cargo test --release -- --test-threads=1     # 5 tests pass, incl. level_gain_evens_out_pitch_and_body.
                                              # --test-threads=1 is REQUIRED: the no-allocation test uses a
                                              # global counting allocator and picks up other test threads
-cargo run --release --example scan           # also: ab, nasal, levelmap, limab, extin <dir>, bench (see "CPU optimisation")
+cargo run --release --example scan           # also: sing <dir> (lyrics), ab, nasal, levelmap, limab, extin <dir>, bench (see "CPU optimisation")
 ```
 
 `cargo` must be on PATH (`~/.cargo/bin`). The Makefile puts the cargo recipe on the library target itself;
@@ -137,6 +336,9 @@ If the module doesn't appear in the browser, check that the Brand filter is clea
 | `chim_set_leveling(v, on)` | Level correction on/off (default on). Test hook used by the examples only (levelmap, limab); not called by the module and not declared in the header. |
 | `chim_set_ext(v, mix)` | External input share, 0 = folds only, 1 = external sound only (clamped, NaN gives 0). Sets `fold_scale = 1 - mix` at the next `chim_set`; the input scaling uses the new mix at once. Real-time safe. |
 | `chim_render_ext(v, in, out, n)` | As `chim_render`, but one sample at a time with `in` (1.0 = 5 V, clamped to ±4, non-finite gives 0) sent through the tract. No allocation. A null `in` falls back to `chim_render`. See "External input (talk box)". |
+| `chim_lyrics_new(text, female)`, `chim_lyrics_free(l)`, `chim_lyrics_len(l)`, `chim_lyrics_text(l, i, buf, n)` | Lyrics plans for one body (see "Lyrics mode"). New and free allocate: worker thread only. `chim_lyrics_new` returns null for no syllables. |
+| `chim_set_lyrics(v, on)` | Lyrics mode on/off; also switches the engine limiter with it. Off drops the voice's pointer to its lyrics. Real-time safe. |
+| `chim_note_on(v, l, i)`, `chim_note_off(v)` | Gate opened / closed in lyrics mode: sing syllable i, end it. Real-time safe. |
 | `chim_is_dead`, `chim_free` | `chim_free` allocates/frees, so never call it on the audio thread. |
 | `chim_velum_cap(v, vowel)` | Exported but not yet declared in the header (debug use). With the nasal fix it returns 1.40 at every vowel. |
 
@@ -150,7 +352,7 @@ Cargo profile: `lto`, `codegen-units=1`, `panic="unwind"` (required for `catch_u
   match the engine rate, the output is muted until a rebuilt voice arrives.
 - **Control rate**: params go to `chim_set` every 16 samples. The engine itself updates every 64 output
   samples, so there is no audio-rate FM.
-- **Gate**: unpatched means always on. Otherwise V/10 sets the breath level (0–1.0; the Rust layer accepts
+- **Gate**: unpatched means always on (in lyrics mode every gate edge sings a syllable, see "Lyrics mode"). Otherwise V/10 sets the breath level (0–1.0; the Rust layer accepts
   up to 1.5). The gate also opens and closes the external input (see below). Below 0.1 V the gate is closed, so a small DC offset cannot hold the voice open. A rising
   edge is held for 128 samples so short triggers sound.
 - **Idle bypass**: after 1 s of silence with the gate closed, rendering stops (a silent voice otherwise
@@ -158,14 +360,14 @@ Cargo profile: `lto`, `codegen-units=1`, `panic="unwind"` (required for `catch_u
 - **Output**: `6.25 * sample` volts (+25% over the original 5 V). By default the engine limiter is off and
   the Rust layer guards the output with `soft_clip` (see EFFORT below), so the peak is 10 V. The vowel-mean
   level is held near -15 dBFS across pitch and body (see "Level correction").
-- **Context menu / patch data**: none. The "Output limiter (old level behaviour)" item and its `"limiter"`
-  JSON key were removed at the user's request (the user heard no difference); the module has no
-  `dataToJson`/`dataFromJson`/`appendContextMenu` and never calls `chim_set_limiter`. The engine limiter is
-  always off (`chim_new`). With FRY at 0 and notes at C3 or below, limiter on and off give sample-identical
+- **Context menu / patch data**: the menu has the Lyrics text field and "Clear lyrics"; `dataToJson` saves only
+  `"lyrics"` (see "Lyrics mode"). The "Output limiter (old level behaviour)" item and its `"limiter"`
+  JSON key were removed at the user's request (the user heard no difference); the module never calls
+  `chim_set_limiter`. The engine limiter is off (`chim_new`) except in lyrics mode (`chim_set_lyrics`). With FRY at 0 and notes at C3 or below, limiter on and off give sample-identical
   output; above that the only difference is level (`examples/limab.rs`).
 - **CV**: each knob except FINE has a CV input (SOURCE since 2026-11-09). 10 V spans the knob's full range; CV is
   added to the knob and clamped to the knob's range. **Rule: every CV input has a CV amount trimmer**
-  (attenuverter, −100..100%, default 100%) at the right of its jack. V/OCT and GATE are not modulation inputs and
+  (attenuverter, −100..100%, default 100%) at the right of its jack. V/OCT, GATE and RESET are not modulation inputs and
   have none; FINE has no CV at all. The trimmers VOWEL, NASAL, TENSION, BRIGHT, BREATHY (`*_ATT_PARAM`) are the
   original five; GLIDE_ATT, VIBDEPTH_ATT, VIBRATE_ATT, LARYNX_ATT, ROUGH_ATT, FRY_ATT, EFFORT_ATT and SOURCE_ATT
   were appended after `SOURCE_PARAM` on 2026-11-09 (before `PARAMS_LEN`), so saved patches keep their ids and
@@ -194,7 +396,7 @@ Cargo profile: `lto`, `codegen-units=1`, `panic="unwind"` (required for `catch_u
     A jack without a trimmer (V/OCT under PITCH) is centred. The panel screws were removed (user request).
   - Cells: PITCH card (5): PITCH, FINE (knob only), GLIDE, VIB DEPTH, VIB RATE. Vocal tract card (4): VOWEL, NASAL,
     LARYNX, BODY switch (labels F up, M down). Vocal folds card (5): TENSION, BRIGHT, BREATHY, ROUGH, FRY. Bottom
-    card (5): EFFORT, GATE jack, EXT IN jack, SOURCE (knob, CV, trimmer), OUT jack.
+    card (5): EFFORT, GATE and RESET jacks (one cell), EXT IN jack, SOURCE (knob, CV, trimmer), OUT jack.
   - The `Cell` table in `PhonaWidget` repeats each param's min, max and default; these are used only when there is
     no module (module browser, screenshots). If a param range changes in the `Phona` constructor, change the `Cell`
     table too.
@@ -249,8 +451,8 @@ pitch falls evenly in pitch to 48 Hz. No raised-f0 trick is sent any more, so th
 shallower vibrato are gone. Check with `cargo run --release --example fry`.
 
 **EFFORT**: range 25-200 %, default 100 %, maps to lung pressure 8 x effort (2..16). The breathiness
-compensation multiplies it and the product is capped at 20. `chim_new` sets `limiter = false` (always off in the
-module); `chim_render` guards the output with `soft_clip`: linear to 1.0, soft knee
+compensation multiplies it and the product is capped at 20. `chim_new` sets `limiter = false` (off in plain mode;
+lyrics mode turns it on); `chim_render` guards the output with `soft_clip`: linear to 1.0, soft knee
 topping out at 1.6 (= 10 V at 6.25 V/unit).
 Measured after the level correction (`cargo run --release --example effort`, vowel ɑ, male C3, RMS dBFS):
 25 % silent (below the phonation threshold), 37.5 % -34, 50 % -23.5, 75 % -17, 100 % -13, 125 % -9,
@@ -479,6 +681,10 @@ likely in CI. `plugin.json` has an empty `authorEmail`, which must be filled in 
 00. Not yet heard or seen by the user: the nasal fix (back vowels at high NASAL), the grey-out of fold-only
    controls with a cable in EXT IN, the redesigned panel (cards, value displays, trimmers on every CV input), and the CPU meter in
    Rack after the optimisation. The panel change is uncommitted (outer repo).
+
+000. Lyrics mode (2026-11-10): the user has not listened to it. Open: the `LYR_MAKEUP` and limiter levels (set
+   from measurements only), an on-panel text editor, greying out VOWEL in lyrics mode, CV selection of the
+   syllable, other languages, the late vowel (see "Lyrics mode"). Not committed.
 
 0. Pending from the level-correction round: the user's listening verdict on the pitch, body and vowel level
    correction (vowel-dependent level is now corrected); the round-3 control ranking was measured with the
