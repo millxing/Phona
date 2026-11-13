@@ -7,6 +7,8 @@
 use chimera::anatomy::human::{ArticKey, ArticPatch, BodyMix, NEUTRAL};
 use chimera::voice::human_airway::HumanAirway;
 use chimera::engine::Engine;
+use chimera::phonetics::beatbox::{beat_ready, BeatStep};
+use chimera::voice::human_voice::DEFAULT_SOURCE;
 use chimera::phonetics::planner::{diphthong_parts, plan_utterance, vowel_artic, PlanOptions};
 use chimera::phonetics::inventory::{phoneme, Manner};
 use chimera::phonetics::{Intonation, Syllable};
@@ -52,6 +54,8 @@ pub struct ChimVoice {
     ext_gate_target: f64,
     ext_gate: f64,
     /// Lyrics mode (see `chim_set_lyrics`): the syllable being sung, with its plan.
+    beat_on: bool,
+    beat_muted: bool,
     lyr_on: bool,
     lyr: *const ChimLyrics,
     lyr_held: Option<usize>,
@@ -440,6 +444,51 @@ pub extern "C" fn chim_set_lyrics(v: *mut ChimVoice, on: i32) {
     }
 }
 
+/// Beat mode owns the source, tract and breath. No singing control can overwrite a hit.
+/// Mode changes cancel old gestures; the physical airway is allowed to settle while muted.
+#[no_mangle]
+pub extern "C" fn chim_set_beatbox(v: *mut ChimVoice, on: i32) {
+    chim_set_lyrics(v, 0);
+    let Some(v) = (unsafe { v.as_mut() }) else { return };
+    v.beat_on = on != 0;
+    v.beat_muted = true;
+    if v.dead { return; }
+    if catch_unwind(AssertUnwindSafe(|| {
+        v.engine.set_gate(0.0);
+        v.engine.voice_mut().fold_scale = if v.beat_on { 0.0 } else { 1.0 };
+        v.engine.set_source(&SourcePatch::from_source(&DEFAULT_SOURCE));
+        if v.beat_on {
+            v.engine.set_artic(&beat_ready(v.engine.info().body), Some(true));
+        }
+        v.engine.voice_mut().glottis.fry_pull = None;
+        v.engine.voice_mut().airway.noise_gain.glottis = v.noise_base;
+        v.engine.voice_mut().ext_in = 0.0;
+        v.ext_gate = 0.0;
+        v.ext_gate_target = 0.0;
+        v.hp_on = false;
+        v.hp_z = [0.0; 2];
+        v.gain = 1.0;
+        v.gain_target = 1.0;
+        v.lyr_fade = 1.0;
+    })).is_err() { v.dead = true; }
+}
+
+/// Monophonic replacement: 1=B, 2=Pf, 3=t. Zero/invalid cancels and mutes.
+/// The engine supplies all breath and duration, independent of gate width.
+#[no_mangle]
+pub extern "C" fn chim_beat_hit(v: *mut ChimVoice, token: i32) {
+    let Some(v) = (unsafe { v.as_mut() }) else { return };
+    if v.dead || !v.beat_on { return; }
+    if catch_unwind(AssertUnwindSafe(|| {
+        v.engine.stop_speech();
+        v.engine.set_gate(0.0);
+        v.beat_muted = true;
+        let id = match token { 1 => "B", 2 => "Pf", 3 => "t", _ => return };
+        v.engine.beat_hit(&BeatStep::new(id));
+        v.beat_muted = false;
+    })).is_err() { v.dead = true; }
+}
+
 /// The tunable values (`TUNE_N` doubles, null = defaults). The ones that shape a syllable's plan
 /// go to `chim_lyrics_new`; this sets the ones that act while the voice runs. Real-time safe.
 #[no_mangle]
@@ -779,7 +828,7 @@ pub extern "C" fn chim_new(sample_rate: f64, female: f64, child: f64) -> *mut Ch
         let mut warm = [0f32; 256];
         engine.render(&mut warm);
         let noise_base = engine.voice().airway.noise_gain.glottis;
-        Box::into_raw(Box::new(ChimVoice { engine, vowels, velum_max, noise_base, female, fs, leveling: true, gain_target: 1.0, gain_coef: 1.0, gain: 1.0, ext_mix: 0.0, ext_lp: 0.0, ext_gate_target: 0.0, ext_gate: 0.0, lyr_on: false, lyr: std::ptr::null(), lyr_held: None, lyr_pending_off: false, lyr_vowel_ready: 0.0, lyr_tail_end: 0.0, lyr_start: 0.0, lyr_dip: (0.0, 0.0), lyr_mute_at: f64::INFINITY, lyr_unmute_at: f64::INFINITY, lyr_fade: 1.0, hp: [1.0, 0.0, 0.0, 0.0, 0.0], hp_z: [0.0; 2], hp_on: false, tune: TUNE_DEFAULT, lyr_level: 1.0, dbg_neutral: false, dead: false }))
+        Box::into_raw(Box::new(ChimVoice { engine, vowels, velum_max, noise_base, female, fs, leveling: true, gain_target: 1.0, gain_coef: 1.0, gain: 1.0, ext_mix: 0.0, ext_lp: 0.0, ext_gate_target: 0.0, ext_gate: 0.0, beat_on: false, beat_muted: true, lyr_on: false, lyr: std::ptr::null(), lyr_held: None, lyr_pending_off: false, lyr_vowel_ready: 0.0, lyr_tail_end: 0.0, lyr_start: 0.0, lyr_dip: (0.0, 0.0), lyr_mute_at: f64::INFINITY, lyr_unmute_at: f64::INFINITY, lyr_fade: 1.0, hp: [1.0, 0.0, 0.0, 0.0, 0.0], hp_z: [0.0; 2], hp_on: false, tune: TUNE_DEFAULT, lyr_level: 1.0, dbg_neutral: false, dead: false }))
     });
     r.unwrap_or(std::ptr::null_mut())
 }
@@ -800,6 +849,7 @@ pub extern "C" fn chim_set(v: *mut ChimVoice, p: *const ChimParams) {
     }
     let v = unsafe { &mut *v };
     let p = unsafe { *p };
+    if v.beat_on { return; }
     if v.dead {
         return;
     }
@@ -977,7 +1027,7 @@ pub extern "C" fn chim_render(v: *mut ChimVoice, out: *mut f32, n: usize) {
         for s in buf.iter_mut() {
             v.gain += v.gain_coef * (v.gain_target - v.gain);
             v.lyr_fade += fade_coef * (fade_to - v.lyr_fade);
-            *s = soft_clip(*s * v.gain) * v.lyr_fade;
+            *s = if v.beat_on && v.beat_muted { 0.0 } else { soft_clip(*s * v.gain) * v.lyr_fade };
         }
     }
 }
@@ -1000,7 +1050,7 @@ pub extern "C" fn chim_render_ext(v: *mut ChimVoice, input: *const f32, out: *mu
             let x = if x.is_finite() { (*x as f64).clamp(-4.0, 4.0) } else { 0.0 };
             v.ext_lp += (1.0 - (-std::f64::consts::TAU * EXT_TILT_HZ / v.fs).exp()) * (x - v.ext_lp);
             v.ext_gate += (1.0 - (-1.0 / (0.005 * v.fs)).exp()) * (v.ext_gate_target - v.ext_gate); // 5 ms
-            v.engine.voice_mut().ext_in = v.ext_lp * EXT_FLOW * v.ext_mix * v.ext_gate;
+            v.engine.voice_mut().ext_in = if v.beat_on { 0.0 } else { v.ext_lp * EXT_FLOW * v.ext_mix * v.ext_gate };
         }
         chim_render(v, unsafe { out.add(i) }, 1);
     }
@@ -1139,6 +1189,67 @@ mod alloc_test {
     static A: Counting = Counting;
 
     #[test]
+    fn beat_controls_retrigger_cancel_and_modes() {
+        for female in [0.0, 1.0] {
+            let v = chim_new(48000.0, female, 0.0);
+            chim_set_beatbox(v, 1);
+            let p = ChimParams { f0: 1500.0, pressure: 20.0, breathiness: 1.5, tension: 1.5,
+                brightness: 1.5, roughness: 2.0, vib_depth: 200.0, vib_rate: 12.0, vowel: 4.0,
+                gate: 1.0, glide: 0.002, fry: 1.0, velum: 1.4, larynx: 1.6, ventricular: 1.0 };
+            let mut out = [0.0f32; 16];
+            for _ in 0..3000 { // empty pattern, even with held gate and external signal
+                chim_set(v, &p);
+                chim_set_ext(v, 1.0);
+                chim_render_ext(v, [1.0f32; 16].as_ptr(), out.as_mut_ptr(), 16);
+                assert!(out.iter().all(|s| *s == 0.0));
+            }
+            for token in [1, 2, 3] {
+                chim_beat_hit(v, token);
+                let mut peak = 0.0f32;
+                for _ in 0..1500 {
+                    let voice = unsafe { &*v };
+                    let before = (voice.engine.voice().glottis.params.abduction,
+                        voice.engine.voice().glottis.params.closure,
+                        voice.engine.voice().glottis.params.effort,
+                        voice.engine.voice().artic.target.to_array());
+                    chim_set(v, &p);
+                    let voice = unsafe { &*v };
+                    let after = (voice.engine.voice().glottis.params.abduction,
+                        voice.engine.voice().glottis.params.closure,
+                        voice.engine.voice().glottis.params.effort,
+                        voice.engine.voice().artic.target.to_array());
+                    assert_eq!(before, after);
+                    assert_eq!(voice.engine.voice().glottis.params.amplitude, 0.0, "no periodic fold excitation");
+                    chim_render(v, out.as_mut_ptr(), 16);
+                    peak = out.iter().fold(peak, |p, s| p.max(s.abs()));
+                }
+                assert!(peak > 0.001, "silent beat {token}, body {female}: {peak}");
+            }
+            for i in 0..100 { // dense replacement must not accumulate a stale score
+                chim_beat_hit(v, i % 3 + 1);
+                assert!(unsafe { &*v }.engine.score().size() <= 16);
+                chim_render(v, out.as_mut_ptr(), 16);
+            }
+            for token in [0, -1, 4, i32::MAX] {
+                chim_beat_hit(v, token);
+                assert_eq!(unsafe { &*v }.engine.score().size(), 0);
+                chim_render(v, out.as_mut_ptr(), 16);
+                assert!(out.iter().all(|s| *s == 0.0));
+            }
+            chim_set_beatbox(v, 0);
+            chim_set_ext(v, 0.0);
+            chim_set(v, &p);
+            assert!(unsafe { &*v }.engine.voice().glottis.params.amplitude > 0.0);
+            chim_set_lyrics(v, 1);
+            chim_set_beatbox(v, 1);
+            assert!(unsafe { &*v }.lyr.is_null());
+            assert_eq!(unsafe { &*v }.engine.score().size(), 0);
+            assert_eq!(chim_is_dead(v), 0);
+            chim_free(v);
+        }
+    }
+
+    #[test]
     fn audio_path_does_not_allocate() {
         for female in [0.0, 1.0] {
             let v = chim_new(48000.0, female, 0.0);
@@ -1183,6 +1294,18 @@ mod alloc_test {
             assert_eq!(COUNT.load(Ordering::Relaxed), 0, "lyrics path allocated (female={female})");
             assert!(peak > 0.05 && chim_is_dead(v) == 0, "lyrics sing (peak {peak})");
             chim_lyrics_free(l);
+            COUNT.store(0, Ordering::Relaxed);
+            ARMED.store(true, Ordering::Relaxed);
+            for k in 0..48000 {
+                if k % 4000 == 0 { chim_set_beatbox(v, 1); }
+                if k % 733 == 0 { chim_beat_hit(v, (k / 733) % 5); }
+                if k % 16 == 0 { chim_set(v, &p); chim_set_ext(v, 1.0); }
+                chim_render_ext(v, &1.0, &mut s, 1);
+                if k % 4000 == 3999 { chim_set_beatbox(v, 0); }
+            }
+            ARMED.store(false, Ordering::Relaxed);
+            assert_eq!(COUNT.load(Ordering::Relaxed), 0, "beat path allocated/freed (female={female})");
+            assert_eq!(chim_is_dead(v), 0);
             chim_free(v);
         }
     }

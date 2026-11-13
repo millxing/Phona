@@ -6,6 +6,8 @@
 #include <thread>
 #include <mutex>
 #include <chrono>
+#include <sstream>
+#include <array>
 
 // Prototype singing voice. One Chimera voice per module (monophonic).
 //
@@ -52,6 +54,9 @@ struct Phona : Module {
 	// over like a voice. `l` is null for an empty text.
 	struct BuiltLyr {
 		ChimLyrics* l;
+		std::vector<int> beats; // worker-owned storage; read only on audio thread
+		bool beat;
+		int version;
 		int body;
 		int n;
 		bool keep; // same text and body as the build before (only the Lab's values changed): the song goes on
@@ -60,6 +65,14 @@ struct Phona : Module {
 	std::string lyrics;
 	std::vector<std::string> sylTexts;     // spelling of each syllable, for the panel
 	std::atomic<int> lyricsVersion{0};
+	std::atomic<bool> beatMode{false};
+	std::atomic<int> beatShown{-1}; // -1 waiting, 0 rest, 1 B, 2 Pf, 3 t, 4 invalid
+	bool voiceBeat = false;
+	// Delay each edge, including multiple edges inside 1ms. Fixed storage covers the
+	// engine's supported sample rates (up to 768kHz); no queue allocations.
+	std::array<bool, 1024> beatEdges{};
+	unsigned beatTick = 0;
+	int beatVersion = -1;
 	BuiltLyr* activeLyr = nullptr;         // owned by the audio thread
 	BuiltLyr* lyrPending = nullptr;        // taken from the worker, waits for the held syllable to end
 	// Tunable values (Phona Lab, an expander next to this module; defaults without it)
@@ -162,6 +175,10 @@ struct Phona : Module {
 		delete b;
 	}
 
+	void setBeatMode(bool on) {
+		if (beatMode.exchange(on) != on) lyricsVersion++;
+	}
+
 	// UI thread: new lyrics text. The worker turns it into syllables.
 	void setLyrics(const std::string& text) {
 		{
@@ -177,6 +194,11 @@ struct Phona : Module {
 	}
 	// UI thread: spelling of the syllable being sung ("" when there is none)
 	std::string shownSyllable() {
+		if (beatMode.load()) {
+			static const char* names[] = {".", "B", "Pf", "t", "?"};
+			int i = beatShown.load();
+			return i >= 0 && i < 5 ? names[i] : "--";
+		}
 		std::lock_guard<std::mutex> lock(lyricsMutex);
 		int i = sylShown;
 		return i >= 0 && i < (int) sylTexts.size() ? sylTexts[i] : "";
@@ -184,15 +206,18 @@ struct Phona : Module {
 
 	json_t* dataToJson() override {
 		json_t* root = json_object();
+		json_object_set_new(root, "beatbox", json_boolean(beatMode.load()));
 		json_object_set_new(root, "lyrics", json_string(getLyrics().c_str()));
 		return root;
 	}
 	void dataFromJson(json_t* root) override {
+		setBeatMode(json_is_true(json_object_get(root, "beatbox")));
 		json_t* l = json_object_get(root, "lyrics");
 		if (l && json_is_string(l)) setLyrics(json_string_value(l));
 	}
 	void onReset(const ResetEvent& e) override {
 		Module::onReset(e);
+		setBeatMode(false);
 		setLyrics("");
 	}
 
@@ -215,6 +240,7 @@ struct Phona : Module {
 			// lyrics: the syllable plans depend on the text and on the body
 			int lv = lyricsVersion.load();
 			int tv = tuneVersion.load();
+			bool beat = beatMode.load();
 			if (lv != builtLyrVersion || b != builtLyrBody || tv != builtTune) {
 				std::string text;
 				{
@@ -223,7 +249,7 @@ struct Phona : Module {
 				}
 				double tune[CHIM_TUNE_N];
 				for (int i = 0; i < CHIM_TUNE_N; i++) tune[i] = tuneShared[i].load();
-				ChimLyrics* l = text.empty() ? nullptr : chim_lyrics_new(text.c_str(), b == 1 ? 1.0 : 0.0, tune);
+				ChimLyrics* l = beat || text.empty() ? nullptr : chim_lyrics_new(text.c_str(), b == 1 ? 1.0 : 0.0, tune);
 				int n = (int) chim_lyrics_len(l);
 				std::vector<std::string> texts;
 				for (int i = 0; i < n; i++) {
@@ -236,7 +262,14 @@ struct Phona : Module {
 					sylTexts = texts;
 				}
 				bool keep = lv == builtLyrVersion && b == builtLyrBody;
-				BuiltLyr* fresh = new BuiltLyr{l, b, n, keep};
+				BuiltLyr* fresh = new BuiltLyr{l, {}, beat, lv, b, n, keep};
+				if (beat) {
+					std::istringstream in(text);
+					std::string token;
+					while (in >> token) {
+						fresh->beats.push_back(token == "B" ? 1 : token == "Pf" ? 2 : token == "t" ? 3 : token == "." ? 0 : 4);
+					}
+				}
 				// a stale unclaimed build is dropped (if it had new text, this one stands in for it)
 				if (BuiltLyr* stale = lyrIncoming.exchange(nullptr)) {
 					fresh->keep = keep && stale->keep;
@@ -300,6 +333,7 @@ struct Phona : Module {
 					outgoing.store(active);
 					active = n;
 					voiceLyr = false; // a new voice starts in plain mode
+					voiceBeat = false;
 					ctrl = 0;
 					idle = false;
 					dead = false;
@@ -337,6 +371,7 @@ struct Phona : Module {
 		if (lyrPending && lyrOutgoing.load() == nullptr && (!lyrPending->keep || chim_lyrics_idle(voice))) {
 			if (!lyrPending->keep) {
 				chim_set_lyrics(voice, 0);
+				if (voiceBeat) { chim_beat_hit(voice, 0); beatShown = -1; beatEdges.fill(false); }
 				voiceLyr = false;
 				syl = 0;
 			}
@@ -346,20 +381,68 @@ struct Phona : Module {
 		}
 		// Lyrics mode needs syllables planned for this voice's body (after a BODY change the two
 		// arrive separately; the plain voice sounds in between).
-		bool wantLyr = activeLyr && activeLyr->l && activeLyr->n > 0 && activeLyr->body == active->body;
+		bool wantBeat = beatMode.load();
+		bool wantLyr = !wantBeat && activeLyr && activeLyr->l && activeLyr->n > 0 && activeLyr->body == active->body;
+		if (wantBeat != voiceBeat) {
+			chim_set_beatbox(voice, wantBeat ? 1 : 0);
+			voiceBeat = wantBeat;
+			beatEdges.fill(false);
+			voiceLyr = false;
+			lyrGate = inputs[GATE_INPUT].getVoltage() >= GATE_THRESHOLD; // require a fresh edge
+			lyrDelay = 0;
+			syl = 0;
+			beatShown = -1;
+			ctrl = 0;
+			idle = false;
+		}
 		if (wantLyr != voiceLyr) {
 			chim_set_lyrics(voice, wantLyr ? 1 : 0);
 			voiceLyr = wantLyr;
 			lyrGate = false;
 			lyrDelay = 0;
 		}
-		lyricsShown = wantLyr;
-		if (resetTrigger.process(inputs[RESET_INPUT].getVoltage(), 0.1f, 1.f)) syl = 0;
+		lyricsShown = wantLyr || wantBeat;
+		if (resetTrigger.process(inputs[RESET_INPUT].getVoltage(), 0.1f, 1.f)) {
+			syl = 0;
+			if (wantBeat) { chim_beat_hit(voice, 0); beatShown = -1; }
+		}
 
 		float gate = 1.f;
 		if (inputs[GATE_INPUT].isConnected()) {
 			float gv = inputs[GATE_INPUT].getVoltage();
 			gate = gv >= GATE_THRESHOLD ? clamp(gv / 10.f, 0.f, 1.f) : 0.f;
+		}
+		if (wantBeat) {
+			int version = lyricsVersion.load();
+			if (version != beatVersion) {
+				beatVersion = version;
+				chim_beat_hit(voice, 0);
+				beatShown = -1;
+				beatEdges.fill(false);
+				syl = 0;
+			}
+			bool open = inputs[GATE_INPUT].isConnected() && gate > 0.f;
+			unsigned slot = beatTick++ % beatEdges.size();
+			if (open && !lyrGate) {
+				unsigned delay = (unsigned) clamp(args.sampleRate * 0.001f, 1.f, 1024.f);
+				beatEdges[(slot + delay - 1) % beatEdges.size()] = true;
+			}
+			if (beatEdges[slot]) {
+				beatEdges[slot] = false;
+				bool ready = activeLyr && activeLyr->beat && activeLyr->version == lyricsVersion.load()
+					&& activeLyr->body == active->body && !activeLyr->beats.empty();
+				int token = 0;
+				if (ready) {
+					if (syl >= (int) activeLyr->beats.size()) syl = 0;
+					token = activeLyr->beats[syl];
+					syl = (syl + 1) % activeLyr->beats.size();
+				}
+				beatShown = ready ? token : -1;
+				chim_beat_hit(voice, token);
+			}
+			lyrGate = open;
+			gate = 0.f; // beat gestures own breath; an unpatched gate never sings
+			gateHold = 0;
 		}
 		// Lyrics: each time the gate opens, the next syllable is sung; when it closes, the syllable
 		// ends (the Rust side keeps a trigger-length gate open until the vowel has sounded).
@@ -458,7 +541,7 @@ struct Phona : Module {
 		}
 
 		// skip rendering once the gate is closed and the voice has decayed to silence
-		if (gate > 0.f) {
+		if (gate > 0.f || wantBeat) {
 			idle = false;
 			silentFor = 0.f;
 		}
@@ -468,7 +551,7 @@ struct Phona : Module {
 			chim_render_ext(voice, &ext, &out, 1);
 			if (gate <= 0.f && std::fabs(out) < 1e-5f) {
 				silentFor += args.sampleTime;
-				if (silentFor > 1.f) idle = true;
+				if (silentFor > 1.f && !wantBeat) idle = true;
 			}
 			else if (gate <= 0.f) {
 				silentFor = 0.f;
@@ -603,12 +686,19 @@ struct ValueArc : TransparentWidget {
 // still work: at SOURCE 50% they act on the fold half of the sound.
 struct DimOverlay : TransparentWidget {
 	Phona* module = nullptr;
+	bool onlyBeat = false;
 	bool whenLyrics = false; // VOWEL: lyrics control the vowel instead of the knob/CV
 	bool whenUnpatched = false; // SOURCE: the opposite case, no effect without a cable in EXT IN
 	void draw(const DrawArgs& args) override {
 		float amount = 1.f;
-		if (whenLyrics) {
+		if (onlyBeat) {
+			if (!module || !module->beatMode.load()) return;
+		}
+		else if (whenLyrics) {
 			if (!module || !module->lyricsShown.load()) return;
+		}
+		else if (module && module->beatMode.load()) {
+			amount = 1.f;
 		}
 		else if (module) {
 			bool ext = module->inputs[Phona::EXT_INPUT].isConnected();
@@ -772,6 +862,16 @@ struct PhonaWidget : ModuleWidget {
 			d->box.size = mm2px(Vec(cellW(1, 4) - 0.4f, span.y - span.x));
 			addChild(d);
 		}
+		// Additional beat-only ineffective cells (other overlays already cover pitch/folds/effort).
+		for (auto cell : {Vec(1, 1), Vec(1, 2), Vec(2, 2), Vec(3, 2)}) {
+			int row = (int) cell.x, col = (int) cell.y, n = row == 1 ? 4 : 5;
+			DimOverlay* d = new DimOverlay;
+			d->module = module;
+			d->onlyBeat = true;
+			d->box.pos = mm2px(Vec(cellLeft(row) + col * cellW(row, n) + 0.2f, ROW0 + row * ROW_H + 4.2f));
+			d->box.size = mm2px(Vec(cellW(row, n) - 0.4f, 25.2f));
+			addChild(d);
+		}
 		// SOURCE is greyed out the other way round: when nothing is patched into EXT IN
 		float sx = cellX(3, 5, 3);
 		addDim(module, 3, sx - w / 2.f + 0.2f, sx + w / 2.f - 0.2f, true);
@@ -784,7 +884,7 @@ struct LyricsField : ui::TextField {
 	Phona* module = nullptr;
 	LyricsField() {
 		box.size.x = 320.f;
-		placeholder = "Type words (a-gain splits syllables)";
+		placeholder = "Words, or B t Pf t . in Beatbox mode";
 	}
 	void onChange(const ChangeEvent& e) override {
 		if (module) module->setLyrics(getText());
@@ -795,12 +895,16 @@ void PhonaWidget::appendContextMenu(Menu* menu) {
 	Phona* module = getModule<Phona>();
 	if (!module) return;
 	menu->addChild(new MenuSeparator);
-	menu->addChild(createMenuLabel("Lyrics: each gate sings the next syllable"));
+	menu->addChild(createCheckMenuItem("Lyrics mode", "", [=]() { return !module->beatMode.load(); }, [=]() { module->setBeatMode(false); }));
+	menu->addChild(createCheckMenuItem("Beatbox mode", "", [=]() { return module->beatMode.load(); }, [=]() { module->setBeatMode(true); }));
+	menu->addChild(createMenuLabel("Lyrics: next syllable per gate; empty = vowel"));
+	menu->addChild(createMenuLabel("Beatbox: B kick, Pf snare, t hat, . rest"));
+	menu->addChild(createMenuLabel("Space-separated; invalid = silent step (?)"));
 	LyricsField* field = new LyricsField;
 	field->module = module;
 	field->setText(module->getLyrics());
 	menu->addChild(field);
-	menu->addChild(createMenuItem("Clear lyrics", "", [=]() { module->setLyrics(""); }));
+	menu->addChild(createMenuItem("Clear text", "", [=]() { module->setLyrics(""); }));
 }
 
 Model* modelPhona = createModel<Phona, PhonaWidget>("Phona");

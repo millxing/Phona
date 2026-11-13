@@ -10,6 +10,9 @@ typedef struct ChimParams {
 // Allocating: never call on the audio thread.
 ChimVoice* chim_new(double sample_rate, double female, double child);
 void chim_free(ChimVoice* v);
+// Beatbox mode and monophonic hits (0/rest or invalid = cancel/mute, 1=B, 2=Pf, 3=t).
+void chim_set_beatbox(ChimVoice* v, int on);
+void chim_beat_hit(ChimVoice* v, int token);
 // Real-time safe.
 void chim_set(ChimVoice* v, const ChimParams* p);
 void chim_render(ChimVoice* v, float* out, size_t n);
