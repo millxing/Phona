@@ -1,0 +1,35 @@
+{
+  "labels": {
+    "wrapper_0": "wrapper_0",
+    "phrase_0": "phrase_0",
+    "wrapper_35": "wrapper_35",
+    "phrase_35": "phrase_35"
+  },
+  "target_lufs": -23.0,
+  "verification": {
+    "wrapper_0": {
+      "lufs": -22.9,
+      "true_peak_dbfs": -10.23,
+      "samples": 490800,
+      "gain_db": -10.86
+    },
+    "phrase_0": {
+      "lufs": -23.01,
+      "true_peak_dbfs": -11.8,
+      "samples": 490800,
+      "gain_db": -9.38
+    },
+    "wrapper_35": {
+      "lufs": -23.0,
+      "true_peak_dbfs": -10.13,
+      "samples": 490800,
+      "gain_db": -10.96
+    },
+    "phrase_35": {
+      "lufs": -23.0,
+      "true_peak_dbfs": -11.83,
+      "samples": 490800,
+      "gain_db": -9.41
+    }
+  }
+}

@@ -603,10 +603,14 @@ struct ValueArc : TransparentWidget {
 // still work: at SOURCE 50% they act on the fold half of the sound.
 struct DimOverlay : TransparentWidget {
 	Phona* module = nullptr;
+	bool whenLyrics = false; // VOWEL: lyrics control the vowel instead of the knob/CV
 	bool whenUnpatched = false; // SOURCE: the opposite case, no effect without a cable in EXT IN
 	void draw(const DrawArgs& args) override {
 		float amount = 1.f;
-		if (module) {
+		if (whenLyrics) {
+			if (!module || !module->lyricsShown.load()) return;
+		}
+		else if (module) {
 			bool ext = module->inputs[Phona::EXT_INPUT].isConnected();
 			if (ext == whenUnpatched) return;
 			if (!whenUnpatched) amount = module->sourceShown; // knob + CV
@@ -759,6 +763,15 @@ struct PhonaWidget : ModuleWidget {
 			addDim(module, 2, x - w / 2.f + 0.2f, x + w / 2.f - 0.2f);
 		}
 		addDim(module, 3, 1.7f, 1.5f + cellW(3, 5) - 0.2f);
+		// Lyrics replace the vowel knob and CV. Keep the active syllable plate readable.
+		for (const auto& span : {Vec(4.2f, VALUE_Y - 1.7f), Vec(VALUE_Y + 1.7f, 29.4f)}) {
+			DimOverlay* d = new DimOverlay;
+			d->module = module;
+			d->whenLyrics = true;
+			d->box.pos = mm2px(Vec(cellLeft(1) + 0.2f, y1 + span.x));
+			d->box.size = mm2px(Vec(cellW(1, 4) - 0.4f, span.y - span.x));
+			addChild(d);
+		}
 		// SOURCE is greyed out the other way round: when nothing is patched into EXT IN
 		float sx = cellX(3, 5, 3);
 		addDim(module, 3, sx - w / 2.f + 0.2f, sx + w / 2.f - 0.2f, true);

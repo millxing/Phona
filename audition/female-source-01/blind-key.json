@@ -1,0 +1,35 @@
+{
+  "labels": {
+    "A": "brightness",
+    "B": "tension",
+    "C": "breathiness",
+    "D": "baseline"
+  },
+  "target_lufs": -23.0,
+  "verification": {
+    "A": {
+      "lufs": -23.0,
+      "true_peak_dbfs": -7.8,
+      "samples": 1005584,
+      "gain_db": -8.39
+    },
+    "B": {
+      "lufs": -23.0,
+      "true_peak_dbfs": -9.42,
+      "samples": 1005584,
+      "gain_db": -6.18
+    },
+    "C": {
+      "lufs": -23.02,
+      "true_peak_dbfs": -8.72,
+      "samples": 1005584,
+      "gain_db": -6.66
+    },
+    "D": {
+      "lufs": -23.0,
+      "true_peak_dbfs": -8.83,
+      "samples": 1005584,
+      "gain_db": -7.52
+    }
+  }
+}
