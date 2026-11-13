@@ -1,0 +1,918 @@
+{
+  "SEQ3": {
+    "params": [
+      {
+        "id": 0,
+        "name": "Tempo",
+        "min": -2.0,
+        "max": 4.0,
+        "default": 1.0
+      },
+      {
+        "id": 1,
+        "name": "Run",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 2,
+        "name": "Reset",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 3,
+        "name": "Steps",
+        "min": 1.0,
+        "max": 8.0,
+        "default": 8.0
+      },
+      {
+        "id": 4,
+        "name": "CV 1 step 1",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 5,
+        "name": "CV 1 step 2",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 6,
+        "name": "CV 1 step 3",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 7,
+        "name": "CV 1 step 4",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 8,
+        "name": "CV 1 step 5",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 9,
+        "name": "CV 1 step 6",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 10,
+        "name": "CV 1 step 7",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 11,
+        "name": "CV 1 step 8",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 12,
+        "name": "CV 2 step 1",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 13,
+        "name": "CV 2 step 2",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 14,
+        "name": "CV 2 step 3",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 15,
+        "name": "CV 2 step 4",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 16,
+        "name": "CV 2 step 5",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 17,
+        "name": "CV 2 step 6",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 18,
+        "name": "CV 2 step 7",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 19,
+        "name": "CV 2 step 8",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 20,
+        "name": "CV 3 step 1",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 21,
+        "name": "CV 3 step 2",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 22,
+        "name": "CV 3 step 3",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 23,
+        "name": "CV 3 step 4",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 24,
+        "name": "CV 3 step 5",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 25,
+        "name": "CV 3 step 6",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 26,
+        "name": "CV 3 step 7",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 27,
+        "name": "CV 3 step 8",
+        "min": -10.0,
+        "max": 10.0,
+        "default": 0.0
+      },
+      {
+        "id": 28,
+        "name": "Step 1 trigger",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 29,
+        "name": "Step 2 trigger",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 30,
+        "name": "Step 3 trigger",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 31,
+        "name": "Step 4 trigger",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 32,
+        "name": "Step 5 trigger",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 33,
+        "name": "Step 6 trigger",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 34,
+        "name": "Step 7 trigger",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 35,
+        "name": "Step 8 trigger",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 36,
+        "name": "Tempo CV",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 37,
+        "name": "Steps CV",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 38,
+        "name": "Clock",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      }
+    ],
+    "inputs": [
+      {
+        "id": 0,
+        "name": "Tempo"
+      },
+      {
+        "id": 1,
+        "name": "Clock"
+      },
+      {
+        "id": 2,
+        "name": "Reset"
+      },
+      {
+        "id": 3,
+        "name": "Steps"
+      },
+      {
+        "id": 4,
+        "name": "Run"
+      }
+    ],
+    "outputs": [
+      {
+        "id": 0,
+        "name": "Trigger"
+      },
+      {
+        "id": 1,
+        "name": "CV 1"
+      },
+      {
+        "id": 2,
+        "name": "CV 2"
+      },
+      {
+        "id": 3,
+        "name": "CV 3"
+      },
+      {
+        "id": 4,
+        "name": "Step 1"
+      },
+      {
+        "id": 5,
+        "name": "Step 2"
+      },
+      {
+        "id": 6,
+        "name": "Step 3"
+      },
+      {
+        "id": 7,
+        "name": "Step 4"
+      },
+      {
+        "id": 8,
+        "name": "Step 5"
+      },
+      {
+        "id": 9,
+        "name": "Step 6"
+      },
+      {
+        "id": 10,
+        "name": "Step 7"
+      },
+      {
+        "id": 11,
+        "name": "Step 8"
+      },
+      {
+        "id": 12,
+        "name": "Steps"
+      },
+      {
+        "id": 13,
+        "name": "Clock"
+      },
+      {
+        "id": 14,
+        "name": "Run"
+      },
+      {
+        "id": 15,
+        "name": "Reset"
+      }
+    ],
+    "data": {
+      "running": true,
+      "gates": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "clockPassthrough": false
+    }
+  },
+  "LFO": {
+    "params": [
+      {
+        "id": 0,
+        "name": "Offset",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 1,
+        "name": "Invert",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 2,
+        "name": "Frequency",
+        "min": -8.0,
+        "max": 10.0,
+        "default": 1.0
+      },
+      {
+        "id": 3,
+        "name": "Frequency modulation",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 4,
+        "name": "",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 5,
+        "name": "Pulse width",
+        "min": 0.009999999776482582,
+        "max": 0.9900000095367432,
+        "default": 0.5
+      },
+      {
+        "id": 6,
+        "name": "Pulse width modulation",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 0.0
+      }
+    ],
+    "inputs": [
+      {
+        "id": 0,
+        "name": "Frequency modulation"
+      },
+      {
+        "id": 1,
+        "name": ""
+      },
+      {
+        "id": 2,
+        "name": "Reset"
+      },
+      {
+        "id": 3,
+        "name": "Pulse width modulation"
+      },
+      {
+        "id": 4,
+        "name": "Clock"
+      }
+    ],
+    "outputs": [
+      {
+        "id": 0,
+        "name": "Sine"
+      },
+      {
+        "id": 1,
+        "name": "Triangle"
+      },
+      {
+        "id": 2,
+        "name": "Sawtooth"
+      },
+      {
+        "id": 3,
+        "name": "Square"
+      }
+    ]
+  },
+  "VCO": {
+    "params": [
+      {
+        "id": 0,
+        "name": "",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 1,
+        "name": "Sync mode",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 2,
+        "name": "Frequency",
+        "min": -54.0,
+        "max": 54.0,
+        "default": 0.0
+      },
+      {
+        "id": 3,
+        "name": "",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 4,
+        "name": "Frequency modulation",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 5,
+        "name": "Pulse width",
+        "min": 0.009999999776482582,
+        "max": 0.9900000095367432,
+        "default": 0.5
+      },
+      {
+        "id": 6,
+        "name": "Pulse width modulation",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 7,
+        "name": "FM mode",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      }
+    ],
+    "inputs": [
+      {
+        "id": 0,
+        "name": "1V/octave pitch"
+      },
+      {
+        "id": 1,
+        "name": "Frequency modulation"
+      },
+      {
+        "id": 2,
+        "name": "Sync"
+      },
+      {
+        "id": 3,
+        "name": "Pulse width modulation"
+      }
+    ],
+    "outputs": [
+      {
+        "id": 0,
+        "name": "Sine"
+      },
+      {
+        "id": 1,
+        "name": "Triangle"
+      },
+      {
+        "id": 2,
+        "name": "Sawtooth"
+      },
+      {
+        "id": 3,
+        "name": "Square"
+      }
+    ]
+  },
+  "VCA": {
+    "params": [
+      {
+        "id": 0,
+        "name": "Channel 1 level",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 1,
+        "name": "Channel 2 level",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 1.0
+      }
+    ],
+    "inputs": [
+      {
+        "id": 0,
+        "name": "Channel 1 exponential CV"
+      },
+      {
+        "id": 1,
+        "name": "Channel 1 linear CV"
+      },
+      {
+        "id": 2,
+        "name": "Channel 1"
+      },
+      {
+        "id": 3,
+        "name": "Channel 2 exponential CV"
+      },
+      {
+        "id": 4,
+        "name": "Channel 2 linear CV"
+      },
+      {
+        "id": 5,
+        "name": "Channel 2"
+      }
+    ],
+    "outputs": [
+      {
+        "id": 0,
+        "name": "Channel 1"
+      },
+      {
+        "id": 1,
+        "name": "Channel 2"
+      }
+    ]
+  },
+  "Notes": {
+    "params": [],
+    "inputs": [],
+    "outputs": [],
+    "data": {
+      "text": ""
+    }
+  },
+  "Phona": {
+    "params": [
+      {
+        "id": 0,
+        "name": "Pitch",
+        "min": -36.0,
+        "max": 36.0,
+        "default": -12.0
+      },
+      {
+        "id": 1,
+        "name": "Fine tune",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 2,
+        "name": "Glide",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.546999990940094
+      },
+      {
+        "id": 3,
+        "name": "Vibrato depth",
+        "min": 0.0,
+        "max": 200.0,
+        "default": 0.0
+      },
+      {
+        "id": 4,
+        "name": "Vibrato rate",
+        "min": 0.5,
+        "max": 12.0,
+        "default": 5.5
+      },
+      {
+        "id": 5,
+        "name": "Vowel (i e a o u)",
+        "min": 0.0,
+        "max": 4.0,
+        "default": 2.0
+      },
+      {
+        "id": 6,
+        "name": "Nasal (velum opening)",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.05999999865889549
+      },
+      {
+        "id": 7,
+        "name": "Larynx height (low/dark .. high/bright)",
+        "min": -1.600000023841858,
+        "max": 1.600000023841858,
+        "default": 0.0
+      },
+      {
+        "id": 8,
+        "name": "Vocal fold tension (lax .. pressed)",
+        "min": -0.5,
+        "max": 1.5,
+        "default": 0.5
+      },
+      {
+        "id": 9,
+        "name": "Brightness (glottal closure)",
+        "min": -0.5,
+        "max": 1.5,
+        "default": 0.25
+      },
+      {
+        "id": 10,
+        "name": "Breathiness",
+        "min": 0.0,
+        "max": 1.5,
+        "default": 0.15000000596046448
+      },
+      {
+        "id": 11,
+        "name": "Roughness (jitter, shimmer, period doubling)",
+        "min": 0.0,
+        "max": 2.0,
+        "default": 0.10000000149011612
+      },
+      {
+        "id": 12,
+        "name": "Vocal fry",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 13,
+        "name": "Body",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0
+      },
+      {
+        "id": 14,
+        "name": "Vowel CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 15,
+        "name": "Nasal CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 16,
+        "name": "Tension CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 17,
+        "name": "Brightness CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 18,
+        "name": "Breathiness CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 19,
+        "name": "Effort (lung pressure)",
+        "min": 0.25,
+        "max": 2.0,
+        "default": 1.0
+      },
+      {
+        "id": 20,
+        "name": "Source (vocal folds .. external input)",
+        "min": 0.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 21,
+        "name": "Glide CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 22,
+        "name": "Vibrato depth CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 23,
+        "name": "Vibrato rate CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 24,
+        "name": "Larynx CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 25,
+        "name": "Roughness CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 26,
+        "name": "Fry CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 27,
+        "name": "Effort CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      },
+      {
+        "id": 28,
+        "name": "Source CV amount",
+        "min": -1.0,
+        "max": 1.0,
+        "default": 1.0
+      }
+    ],
+    "inputs": [
+      {
+        "id": 0,
+        "name": "1V/octave pitch"
+      },
+      {
+        "id": 1,
+        "name": "Glide CV (10V = full knob range)"
+      },
+      {
+        "id": 2,
+        "name": "Vibrato depth CV (10V = full knob range)"
+      },
+      {
+        "id": 3,
+        "name": "Vibrato rate CV (10V = full knob range)"
+      },
+      {
+        "id": 4,
+        "name": "Vowel CV (10V = full knob range)"
+      },
+      {
+        "id": 5,
+        "name": "Nasal CV (10V = full knob range)"
+      },
+      {
+        "id": 6,
+        "name": "Larynx CV (10V = full knob range)"
+      },
+      {
+        "id": 7,
+        "name": "Tension CV (10V = full knob range)"
+      },
+      {
+        "id": 8,
+        "name": "Brightness CV (10V = full knob range)"
+      },
+      {
+        "id": 9,
+        "name": "Breathiness CV (10V = full knob range)"
+      },
+      {
+        "id": 10,
+        "name": "Roughness CV (10V = full knob range)"
+      },
+      {
+        "id": 11,
+        "name": "Fry CV (10V = full knob range)"
+      },
+      {
+        "id": 12,
+        "name": "Gate / breath envelope (0.1-10V; unpatched = always on)"
+      },
+      {
+        "id": 13,
+        "name": "Effort CV (10V = full knob range)"
+      },
+      {
+        "id": 14,
+        "name": "External sound (replaces the vocal folds; no effect when unpatched)"
+      },
+      {
+        "id": 15,
+        "name": "Source CV (10V = full knob range)"
+      },
+      {
+        "id": 16,
+        "name": "Reset (lyrics start again at the first syllable)"
+      }
+    ],
+    "outputs": [
+      {
+        "id": 0,
+        "name": "Voice"
+      }
+    ],
+    "data": {
+      "lyrics": ""
+    }
+  }
+}
