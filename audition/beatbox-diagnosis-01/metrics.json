@@ -1,0 +1,584 @@
+{
+  "features": {
+    "B": {
+      "Reference: heavy kick": {
+        "energy90_ms": 43.0625,
+        "centroid_hz": 171.75129968879185,
+        "band_fraction": [
+          0.6277901850061735,
+          0.356673001768162,
+          0.011282546921234067,
+          0.003919420464421676,
+          0.0003348458400087793
+        ],
+        "peak": 1.2571020126342773,
+        "alignment_onset_ms": 252.125
+      },
+      "Reference: light kick": {
+        "energy90_ms": 26.375,
+        "centroid_hz": 185.8979983359532,
+        "band_fraction": [
+          0.5257790715709509,
+          0.4584453080351402,
+          0.011290208388260432,
+          0.004295017289190632,
+          0.00019039471645770993
+        ],
+        "peak": 1.3977806568145752,
+        "alignment_onset_ms": 381.1875
+      },
+      "wrapper": {
+        "energy90_ms": 28.979166666666668,
+        "centroid_hz": 440.04817844962236,
+        "band_fraction": [
+          0.6721951688268042,
+          0.19869719415811815,
+          0.09178236952357406,
+          0.02831489719109647,
+          0.009010370300407057
+        ],
+        "peak": 0.1765262931585312,
+        "alignment_onset_ms": 639.1041666666666
+      },
+      "folds": {
+        "energy90_ms": 28.979166666666668,
+        "centroid_hz": 440.04817844962236,
+        "band_fraction": [
+          0.6721951688268042,
+          0.19869719415811815,
+          0.09178236952357406,
+          0.02831489719109647,
+          0.009010370300407057
+        ],
+        "peak": 0.1765262931585312,
+        "alignment_onset_ms": 639.1041666666666
+      },
+      "limiter": {
+        "energy90_ms": 28.979166666666668,
+        "centroid_hz": 440.04817844962236,
+        "band_fraction": [
+          0.6721951688268042,
+          0.19869719415811815,
+          0.09178236952357406,
+          0.02831489719109647,
+          0.009010370300407057
+        ],
+        "peak": 0.1765262931585312,
+        "alignment_onset_ms": 639.1041666666666
+      },
+      "no_cancel": {
+        "energy90_ms": 28.979166666666668,
+        "centroid_hz": 440.04817844962236,
+        "band_fraction": [
+          0.6721951688268042,
+          0.19869719415811815,
+          0.09178236952357406,
+          0.02831489719109647,
+          0.009010370300407057
+        ],
+        "peak": 0.1765262931585312,
+        "alignment_onset_ms": 639.1041666666666
+      },
+      "native_live": {
+        "energy90_ms": 27.520833333333332,
+        "centroid_hz": 433.1859967235487,
+        "band_fraction": [
+          0.6643618387438185,
+          0.20442095143556058,
+          0.09826445663418432,
+          0.024174194477579652,
+          0.008778558708856785
+        ],
+        "peak": 0.17533311247825623,
+        "alignment_onset_ms": 639.1041666666666
+      },
+      "native_planned": {
+        "energy90_ms": 70.4375,
+        "centroid_hz": 261.29734608740887,
+        "band_fraction": [
+          0.7999439958483889,
+          0.08561832642879154,
+          0.09951288611356579,
+          0.012737341926617542,
+          0.0021874496826362723
+        ],
+        "peak": 0.1145922914147377,
+        "alignment_onset_ms": 500.5625
+      },
+      "mic_style": {
+        "energy90_ms": 186.10416666666666,
+        "centroid_hz": 247.106085708066,
+        "band_fraction": [
+          0.931168089970993,
+          0.026059319062534114,
+          0.020536129841385996,
+          0.015500747375208405,
+          0.006735713749878445
+        ],
+        "peak": 0.32766714692115784,
+        "alignment_onset_ms": 504.7916666666667
+      }
+    },
+    "Pf": {
+      "Reference: snare": {
+        "energy90_ms": 68.14583333333333,
+        "centroid_hz": 983.7929364939122,
+        "band_fraction": [
+          0.6239302718338093,
+          0.04666496478889118,
+          0.12670831477632605,
+          0.1975511250237909,
+          0.005145323577182546
+        ],
+        "peak": 1.3095624446868896,
+        "alignment_onset_ms": 589.9166666666666
+      },
+      "wrapper": {
+        "energy90_ms": 106.75,
+        "centroid_hz": 1600.3389891447855,
+        "band_fraction": [
+          0.6958275556853111,
+          0.08815812386043383,
+          0.05710769446514394,
+          0.07204474173640704,
+          0.08686188425270394
+        ],
+        "peak": 0.2450007051229477,
+        "alignment_onset_ms": 617.9791666666666
+      },
+      "folds": {
+        "energy90_ms": 106.75,
+        "centroid_hz": 1600.3389891447855,
+        "band_fraction": [
+          0.6958275556853111,
+          0.08815812386043383,
+          0.05710769446514394,
+          0.07204474173640704,
+          0.08686188425270394
+        ],
+        "peak": 0.2450007051229477,
+        "alignment_onset_ms": 617.9791666666666
+      },
+      "limiter": {
+        "energy90_ms": 106.75,
+        "centroid_hz": 1600.3389891447855,
+        "band_fraction": [
+          0.6958275556853111,
+          0.08815812386043383,
+          0.05710769446514394,
+          0.07204474173640704,
+          0.08686188425270394
+        ],
+        "peak": 0.2450007051229477,
+        "alignment_onset_ms": 617.9791666666666
+      },
+      "no_cancel": {
+        "energy90_ms": 106.75,
+        "centroid_hz": 1600.3389891447855,
+        "band_fraction": [
+          0.6958275556853111,
+          0.08815812386043383,
+          0.05710769446514394,
+          0.07204474173640704,
+          0.08686188425270394
+        ],
+        "peak": 0.2450007051229477,
+        "alignment_onset_ms": 617.9791666666666
+      },
+      "native_live": {
+        "energy90_ms": 106.79166666666667,
+        "centroid_hz": 1639.3572632299317,
+        "band_fraction": [
+          0.6948155529098863,
+          0.08868983595646716,
+          0.051752611423905755,
+          0.07274562812015097,
+          0.0919963715895899
+        ],
+        "peak": 0.24585014581680298,
+        "alignment_onset_ms": 617.9791666666666
+      },
+      "native_planned": {
+        "energy90_ms": 106.27083333333333,
+        "centroid_hz": 1664.9018356571285,
+        "band_fraction": [
+          0.7401943471802035,
+          0.038680258126144625,
+          0.051005381383426834,
+          0.07697832174646252,
+          0.09314169156376255
+        ],
+        "peak": 0.1932777613401413,
+        "alignment_onset_ms": 487.3333333333333
+      },
+      "mic_style": {
+        "energy90_ms": 110.83333333333333,
+        "centroid_hz": 657.5687737602618,
+        "band_fraction": [
+          0.8818580385706203,
+          0.024223814475768633,
+          0.022890737433676835,
+          0.0411012266727306,
+          0.02992618284720362
+        ],
+        "peak": 0.27284911274909973,
+        "alignment_onset_ms": 617.875
+      }
+    },
+    "t": {
+      "Reference: hat": {
+        "energy90_ms": 24.854166666666668,
+        "centroid_hz": 7486.324395403309,
+        "band_fraction": [
+          0.03876046041042204,
+          0.007988533387390171,
+          0.01142130550328981,
+          0.5363444073203959,
+          0.40548529337850203
+        ],
+        "peak": 1.449771523475647,
+        "alignment_onset_ms": 248.02083333333334
+      },
+      "wrapper": {
+        "energy90_ms": 164.54166666666666,
+        "centroid_hz": 2144.4794087216746,
+        "band_fraction": [
+          0.408681839722461,
+          0.07634676401430017,
+          0.03691119800843497,
+          0.42838491578544197,
+          0.04967528246936183
+        ],
+        "peak": 0.09905755519866943,
+        "alignment_onset_ms": 501.5833333333333
+      },
+      "folds": {
+        "energy90_ms": 164.54166666666666,
+        "centroid_hz": 2144.4794087216746,
+        "band_fraction": [
+          0.408681839722461,
+          0.07634676401430017,
+          0.03691119800843497,
+          0.42838491578544197,
+          0.04967528246936183
+        ],
+        "peak": 0.09905755519866943,
+        "alignment_onset_ms": 501.5833333333333
+      },
+      "limiter": {
+        "energy90_ms": 164.54166666666666,
+        "centroid_hz": 2144.4794087216746,
+        "band_fraction": [
+          0.408681839722461,
+          0.07634676401430017,
+          0.03691119800843497,
+          0.42838491578544197,
+          0.04967528246936183
+        ],
+        "peak": 0.09905755519866943,
+        "alignment_onset_ms": 501.5833333333333
+      },
+      "no_cancel": {
+        "energy90_ms": 164.54166666666666,
+        "centroid_hz": 2144.4794087216746,
+        "band_fraction": [
+          0.408681839722461,
+          0.07634676401430017,
+          0.03691119800843497,
+          0.42838491578544197,
+          0.04967528246936183
+        ],
+        "peak": 0.09905755519866943,
+        "alignment_onset_ms": 501.5833333333333
+      },
+      "native_live": {
+        "energy90_ms": 163.27083333333334,
+        "centroid_hz": 2228.742472659648,
+        "band_fraction": [
+          0.3575400231219904,
+          0.06689322763290444,
+          0.02584767425273074,
+          0.5056266325267833,
+          0.04409244246559112
+        ],
+        "peak": 0.09901735186576843,
+        "alignment_onset_ms": 501.6041666666667
+      },
+      "native_planned": {
+        "energy90_ms": 156.64583333333334,
+        "centroid_hz": 2127.318272187401,
+        "band_fraction": [
+          0.4128140682143456,
+          0.024373155111725896,
+          0.027339269650329137,
+          0.4985872613578728,
+          0.03688624566572655
+        ],
+        "peak": 0.09036539494991302,
+        "alignment_onset_ms": 393.9166666666667
+      },
+      "mic_style": {
+        "energy90_ms": 181.5,
+        "centroid_hz": 832.7284853964827,
+        "band_fraction": [
+          0.7610311677740934,
+          0.02515617654204782,
+          0.012193693673873608,
+          0.1882201371044828,
+          0.01339882490550224
+        ],
+        "peak": 0.18635259568691254,
+        "alignment_onset_ms": 501.5208333333333
+      },
+      "pulse_half": {
+        "energy90_ms": 129.04166666666666,
+        "centroid_hz": 1124.359376913994,
+        "band_fraction": [
+          0.5948672925957371,
+          0.12704433364239423,
+          0.04211667027954024,
+          0.2103540967469691,
+          0.02561760673535935
+        ],
+        "peak": 0.09888018667697906,
+        "alignment_onset_ms": 501.5833333333333
+      },
+      "pulse_quarter": {
+        "energy90_ms": 179.04166666666666,
+        "centroid_hz": 455.3308402010587,
+        "band_fraction": [
+          0.6725084094140731,
+          0.22132008672089432,
+          0.027192804790624397,
+          0.06806156240513779,
+          0.010917136669270312
+        ],
+        "peak": 0.053247272968292236,
+        "alignment_onset_ms": 501.2916666666667
+      }
+    }
+  },
+  "interventions": {
+    "male_B": {
+      "folds": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "limiter": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "no_cancel": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "native_live": {
+        "max_abs_difference": 0.02688286267220974,
+        "identical": false
+      },
+      "native_planned": {
+        "max_abs_difference": 0.17670287191867828,
+        "identical": false
+      }
+    },
+    "male_Pf": {
+      "folds": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "limiter": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "no_cancel": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "native_live": {
+        "max_abs_difference": 0.09930458664894104,
+        "identical": false
+      },
+      "native_planned": {
+        "max_abs_difference": 0.2366326004266739,
+        "identical": false
+      }
+    },
+    "male_t": {
+      "folds": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "limiter": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "no_cancel": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "native_live": {
+        "max_abs_difference": 0.08690106123685837,
+        "identical": false
+      },
+      "native_planned": {
+        "max_abs_difference": 0.11260654777288437,
+        "identical": false
+      }
+    },
+    "male_pattern": {
+      "folds": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "limiter": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "no_cancel": {
+        "max_abs_difference": 0.010455495677888393,
+        "identical": false
+      },
+      "native_live": {
+        "max_abs_difference": 0.1098063737154007,
+        "identical": false
+      },
+      "native_planned": {
+        "max_abs_difference": 0.23709511756896973,
+        "identical": false
+      }
+    },
+    "male_fast": {
+      "folds": {
+        "max_abs_difference": 0.13989965617656708,
+        "identical": false
+      },
+      "limiter": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "no_cancel": {
+        "max_abs_difference": 0.15842297673225403,
+        "identical": false
+      },
+      "native_live": {
+        "max_abs_difference": 0.15685242414474487,
+        "identical": false
+      },
+      "native_planned": {
+        "max_abs_difference": 0.2827392816543579,
+        "identical": false
+      }
+    },
+    "female_B": {
+      "folds": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "limiter": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "no_cancel": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "native_live": {
+        "max_abs_difference": 0.007847127504646778,
+        "identical": false
+      },
+      "native_planned": {
+        "max_abs_difference": 0.07729539275169373,
+        "identical": false
+      }
+    },
+    "female_Pf": {
+      "folds": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "limiter": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "no_cancel": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "native_live": {
+        "max_abs_difference": 0.03423028066754341,
+        "identical": false
+      },
+      "native_planned": {
+        "max_abs_difference": 0.10594119876623154,
+        "identical": false
+      }
+    },
+    "female_t": {
+      "folds": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "limiter": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "no_cancel": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "native_live": {
+        "max_abs_difference": 0.03374183923006058,
+        "identical": false
+      },
+      "native_planned": {
+        "max_abs_difference": 0.04578142613172531,
+        "identical": false
+      }
+    },
+    "female_pattern": {
+      "folds": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "limiter": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "no_cancel": {
+        "max_abs_difference": 0.004928140435367823,
+        "identical": false
+      },
+      "native_live": {
+        "max_abs_difference": 0.044359881430864334,
+        "identical": false
+      },
+      "native_planned": {
+        "max_abs_difference": 0.10609414428472519,
+        "identical": false
+      }
+    },
+    "female_fast": {
+      "folds": {
+        "max_abs_difference": 0.06018095090985298,
+        "identical": false
+      },
+      "limiter": {
+        "max_abs_difference": 0.0,
+        "identical": true
+      },
+      "no_cancel": {
+        "max_abs_difference": 0.07506406307220459,
+        "identical": false
+      },
+      "native_live": {
+        "max_abs_difference": 0.063214510679245,
+        "identical": false
+      },
+      "native_planned": {
+        "max_abs_difference": 0.1271028071641922,
+        "identical": false
+      }
+    }
+  },
+  "listening_active_rms": 0.07
+}

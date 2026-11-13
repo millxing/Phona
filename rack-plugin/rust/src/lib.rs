@@ -1310,3 +1310,6 @@ mod alloc_test {
         }
     }
 }
+
+#[cfg(test)]
+mod beat_compare;

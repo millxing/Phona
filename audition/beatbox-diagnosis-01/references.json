@@ -1,0 +1,42 @@
+[
+  {
+    "title": "Heavy Kick",
+    "source": "https://vmdmusic.bandcamp.com/album/beatbox-sample-pack",
+    "track_page": "https://vmdmusic.bandcamp.com/track/heavy-kick",
+    "file": "ref_heavy_kick.mp3",
+    "bytes": 22568,
+    "sha256": "7e7cf5ceaa3808311439d1544e043700b30a3cf8eb34251657d2b67a70f035a0",
+    "format": "public 128 kbps MP3 preview; not lossless measurement ground truth",
+    "usage": "private reference audition/analysis only; not shipped or committed"
+  },
+  {
+    "title": "Light Kick",
+    "source": "https://vmdmusic.bandcamp.com/album/beatbox-sample-pack",
+    "track_page": "https://vmdmusic.bandcamp.com/track/light-kick",
+    "file": "ref_light_kick.mp3",
+    "bytes": 17971,
+    "sha256": "81d65a3dd1a01aa375a25a893cabc84011db29a459e820991153a485b9900118",
+    "format": "public 128 kbps MP3 preview; not lossless measurement ground truth",
+    "usage": "private reference audition/analysis only; not shipped or committed"
+  },
+  {
+    "title": "Closed Hi-Hat",
+    "source": "https://vmdmusic.bandcamp.com/album/beatbox-sample-pack",
+    "track_page": "https://vmdmusic.bandcamp.com/track/closed-hi-hat",
+    "file": "ref_hat.mp3",
+    "bytes": 17971,
+    "sha256": "2d458e53c9ecf3e28964367def02803161a44afdc80a4d5d8c3cdbff79f81e05",
+    "format": "public 128 kbps MP3 preview; not lossless measurement ground truth",
+    "usage": "private reference audition/analysis only; not shipped or committed"
+  },
+  {
+    "title": "Punchy Snare",
+    "source": "https://vmdmusic.bandcamp.com/album/beatbox-sample-pack",
+    "track_page": "https://vmdmusic.bandcamp.com/track/punchy-snare",
+    "file": "ref_snare.mp3",
+    "bytes": 22986,
+    "sha256": "2deee2f97600bc3cf227e6f765badff2712b30d5f3c4fb8a10386eb8f4135108",
+    "format": "public 128 kbps MP3 preview; not lossless measurement ground truth",
+    "usage": "private reference audition/analysis only; not shipped or committed"
+  }
+]
