@@ -912,7 +912,8 @@
       }
     ],
     "data": {
-      "lyrics": ""
+      "lyrics": "",
+      "beatbox": false
     }
   }
 }

@@ -50,7 +50,12 @@ int main(int argc,char**argv) { try {
  }
  auto seq=modules.at(1).get();auto voice=modules.at(2).get(); auto vca=modules.at(5).get();
  engine::Module::ProcessArgs args; args.sampleRate=48000;args.sampleTime=1.f/48000;args.frame=0;
- double energy=0,peak=0; int edges=0; bool last=false; std::vector<float> notes;
+ double energy=0,peak=0; int edges=0; bool last=false; std::vector<float> notes; std::vector<int> edgeFrames;
+ bool held=std::string(argv[3]).find("held")!=std::string::npos;
+ bool beat=std::string(argv[3]).find("beatbox")!=std::string::npos;
+ // Leave 20ms past the final beat: the installed SEQ-3 float phase can round
+ // a clock edge just beyond an exact 17s boundary.
+ const int runFrames=48000*17+(beat?960:0);
  auto tick=[&](){
   // Transfer previous sample first, as Rack cables do.
   for(auto&w:wires) w.dst->inputs[w.in].setVoltage(w.src->outputs[w.out].getVoltage());
@@ -67,20 +72,24 @@ int main(int argc,char**argv) { try {
  require(voice->inputs[12].getVoltage()==0,"fixture starts with open gate");
  seq->params[2].setValue(1);tick();seq->params[2].setValue(0);tick();
  seq->params[1].setValue(1);tick();seq->params[1].setValue(0);
- for(int n=0;n<48000*17;n++) {
+ for(int n=0;n<runFrames;n++) {
   float x=tick(); energy+=x*x; peak=std::max(peak,double(std::abs(x)));
   bool gate=voice->inputs[12].getVoltage()>0.1f;
-  if(gate&&!last){edges++;notes.push_back(voice->inputs[0].getVoltage());}last=gate;
+  if(gate&&!last){edgeFrames.push_back(n);edges++;notes.push_back(voice->inputs[0].getVoltage());}last=gate;
   if(n%4800==0)std::this_thread::yield();
  }
  require(energy>1,"voice stayed silent");
- bool held=std::string(argv[3]).find("held")!=std::string::npos;
- require(edges==(held?5:17),"unexpected gate count over 17 seconds");
+ if(edges!=(beat?68:held?5:17)) std::cerr << "gate edges=" << edges << " expected=" << (beat?68:held?5:17) << "\n";
+ require(edges==(beat?68:held?5:17),"unexpected gate count over test interval");
+ if(beat) {
+  for(size_t k=1;k<edgeFrames.size();k++) require(std::abs(edgeFrames[k]-edgeFrames[k-1]-12000)<=12,"beat clock period outside 0.1 percent tolerance");
+  std::cout << "Beat clock first edge=" << edgeFrames.front() << " samples; first period=" << edgeFrames[1]-edgeFrames[0] << " samples\n";
+ }
 
  const float expected[]={0,2.f/12,4.f/12,5.f/12,7.f/12,9.f/12,11.f/12,1};
- if(!held) for(size_t k=0;k<notes.size();k++) require(std::abs(notes[k]-expected[(k+1)%8])<1e-5,"pitch/trigger sequence differs");
+ if(!held && !beat) for(size_t k=0;k<notes.size();k++) require(std::abs(notes[k]-expected[(k+1)%8])<1e-5,"pitch/trigger sequence differs");
  if(held) for(size_t k=0;k<notes.size();k++) require(std::abs(notes[k]-(k%2?7.f/12:2.f/12))<1e-5,"held-gate pitch sequence differs");
- std::cout<<"PASS recall, finite output, fault light, zero VCA, gate/pitch sequence: edges="<<edges<<" peak="<<peak<<" V RMS="<<sqrt(energy/(48000*17))<<" V\n";
+ std::cout<<"PASS recall, finite output, fault light, zero VCA, gate/pitch sequence: edges="<<edges<<" peak="<<peak<<" V RMS="<<sqrt(energy/runFrames)<<" V\n";
  // One-sample retriggers and reset offsets: audio/fault checks, not syllable identity.
  wires.clear();
  for(int offset : {0,2,30,60}) {
@@ -92,7 +101,17 @@ int main(int argc,char**argv) { try {
    voice->inputs[16].setVoltage(n==offset?10:0);
    float x=tick();burst+=x*x;
   }
-  require(burst>0.01,"one-sample gate produced no audio");
+  if(beat && offset==60) {
+   // A reset outside the 1ms window cancels the preparing hit. The next edge
+   // must start token one, rather than expecting the cancelled hit to sound.
+   require(burst<0.01,"late beat reset did not cancel preparation");
+   double next=0;
+   for(int n=0;n<24000;n++) {
+    voice->inputs[12].setVoltage(n==0?10:0);
+    float x=tick();next+=x*x;
+   }
+   require(next>0.01,"beat after late reset stayed silent");
+  } else require(burst>0.01,"one-sample gate produced no audio");
  }
  std::cout<<"PASS one-sample gates with reset offsets 0/2/30/60 samples (audio/fault only)\n";
  // Body swap under a held gate, then slow CV and external excitation.

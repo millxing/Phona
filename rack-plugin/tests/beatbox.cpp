@@ -4,18 +4,19 @@
 #include <iostream>
 Plugin* pluginInstance = nullptr;
 Model* modelPhonaLab = nullptr;
-int main() {
+int main(int argc, char** argv) {
     Context context;
     context.engine = new engine::Engine;
     contextSet(&context);
     Phona m;
-    Module::ProcessArgs args{48000.f, 1.f/48000.f, 0};
+    float rate = argc > 1 ? std::stof(argv[1]) : 48000.f;
+    Module::ProcessArgs args{rate, 1.f/rate, 0};
     auto tick = [&](int n) { for (int i=0;i<n;i++) m.process(args); };
     auto ready = [&]() {
         for (int i=0;i<2000;i++) {
             tick(16);
             if (m.active && m.activeLyr && m.activeLyr->version == m.lyricsVersion.load()
-                && m.activeLyr->body == m.active->body && m.active->body == (int)m.params[Phona::BODY_PARAM].getValue()) return;
+                && m.activeLyr->body == m.active->body && m.active->body == (int)m.params[Phona::BODY_PARAM].getValue() && m.active->rate == rate) return;
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
         assert(false && "worker timeout");

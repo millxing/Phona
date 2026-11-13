@@ -6,7 +6,11 @@ and both VCA levels are zero. No device settings are saved. Opening the supplied
 file cannot send sound to a hardware output. Do not merge it into a live patch.
 
 Only Phona, Core Notes, and installed VCV Free (Fundamental) modules are used.
-There is one Phona voice. Beatbox and Phona Lab are not required.
+There is one Phona voice. The singing fixtures do not require Beatbox or Phona Lab.
+A third fixture, `beatbox-triggers.vcv`, starts in Beatbox mode with `B t Pf t B . Pf t`,
+four triggers per second, stopped transport, and zero VCA gain. Its pitch and modulation
+cables are omitted because those controls do not affect this prototype. The parked LFO
+and VCO are unused. See `beatbox-prototype.md` for timing and cancellation limits.
 
 ## Patch map
 
@@ -88,7 +92,7 @@ from the plugin binaries and Core Notes in libRack. `schema.json` is that captur
 schema, not inferred numeric IDs. The script fails on schema drift. Inspect the
 change before replacing the snapshot; do not blindly rebaseline it.
 
-`generate.py` deterministically writes the two plain-JSON Rack 2 patches.
+`generate.py` deterministically writes the three plain-JSON Rack 2 patches.
 `generate.py --check` checks exact fixture content, parameter ranges, cable
 endpoints, duplicate input connections, stopped transport, and zero VCA gain.
 
@@ -99,7 +103,19 @@ finite output within ±10.01 V, absence of the red fault light, zero VCA output,
 one-sample gates with reset offsets 0/2/30/60 samples, body change, slow CV,
 external excitation, and gate-close decay. It does not play or write audio.
 
-## Evidence and limits (2026-11-13)
+## Integration checks (2026-11-13)
+
+The parent integrated the beatbox prototype and updated the captured schema for the single
+new default JSON field `beatbox: false`. Parameter and input IDs did not change. Both singing
+fixtures now explicitly save that field; legacy patches without it are tested by `tests/beatbox.sh`.
+The host test also checks the beatbox fixture. At 4 Hz the installed SEQ-3 has a 12001-sample
+clock period at 48 kHz, so this fixture runs 17.02 seconds to include the 68th edge. Its clock
+period must remain within 0.1% of 12000 samples. This avoids a false failure at an exact window edge.
+A beat reset 60 samples late deliberately cancels the preparing hit; the next gate must sound.
+Use `PHONA_PATCHES=beatbox-triggers` to run only that fixture's host smoke (all schemas and
+fixture files are still checked). Singing regression coverage remains unchanged.
+
+## Original agent evidence and limits (2026-11-13)
 
 **Verified:** SDK 2.6.6, Fundamental 2.6.4, installed Phona 2.1.0. Installed Phona
 binary SHA-256:

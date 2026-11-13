@@ -22,7 +22,7 @@ print('PASS live installed schema matches fixture schema')
 PY
 python3 "$HERE/generate.py" --check
 status=0
-for patch in singing-triggers singing-held; do
+for patch in ${PHONA_PATCHES:-singing-triggers singing-held beatbox-triggers}; do
   "$TEST_TMP/host_smoke" "$RACK_PLUGINS/Fundamental" "$PHONA_DIR" "$HERE/$patch.vcv" || status=1
 done
 exit "$status"

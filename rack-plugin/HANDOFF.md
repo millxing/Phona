@@ -1,4 +1,26 @@
-# Phona — VCV Rack plugin: handoff (2026-11-09)
+# Phona — VCV Rack plugin: handoff
+
+## Current snapshot (2026-11-13)
+
+The sections below are historical implementation notes. Their “not committed” and outstanding
+listening labels are not a reliable current task list. Lyrics, panel work, and the voice audition
+experiments are committed. The user prefers to develop a live instrument rather than reproduce
+the preplanned duet demo; pause female-tone tuning for now.
+
+A dedicated beatbox prototype now accepts `B`, `Pf`, `t`, and `.` in the shared text field via
+Lyrics/Beatbox menu selection. Every gate advances one token; reset restarts the sequence.
+The model needs substantial preparation time, so this is experimental, not a tight drum-machine
+replacement. See [beatbox details](docs/beatbox-prototype.md) and
+[live test patches/checklist](docs/live-instrument-test.md). The engine fork is unchanged.
+VOWEL dims during lyrics; ineffective controls dim during beatbox. Save data adds `beatbox`
+without changing parameter/input IDs; old patches load in Lyrics mode.
+
+See [overnight report](docs/overnight-progress-2026-11-13.md) for integration, installed-build
+status, verification, remaining risks, and next steps. No new listening verdict is claimed.
+
+---
+
+# Historical handoff (2026-11-09 onward)
 
 Status of the working prototype, how it is built, the design decisions behind it, and what is left.
 The original project brief is `../CHIMERA-RACK-HANDOFF.md`; this file supersedes it for current state.

@@ -1,6 +1,6 @@
 # Beatbox prototype
 
-Status: implemented and checked offline on macOS arm64. Listening and live Rack checks remain with the parent. No engine source or `engine-fork.patch` changes.
+Status: integrated and checked offline on macOS arm64. Listening and live Rack checks remain pending. No engine source or `engine-fork.patch` changes.
 
 ## Use and behavior
 
@@ -51,7 +51,9 @@ Verified:
 - Offline isolated and pattern renders completed without a dead voice. Last 250 ms of each isolated PCM16 WAV was zero.
 - `git diff --check` passed.
 
-Not run: live Rack UI/audio, listening evaluation, engine suite (engine unchanged), other platforms, multi-rate beat timing/stress, new CPU benchmark. Existing vowel/velum mappings were not changed, so no new nasal/range scans were required.
+Parent integration: the C++ module regression also passes at 44.1 and 96 kHz. These checks cover token/reset/mode behavior, not acoustic timing at those rates. The added beatbox Rack fixture exercises the built plugin with real Fundamental modules.
+
+Not run: live Rack UI/audio, listening evaluation, engine suite (engine unchanged), other platforms, multi-rate acoustic timing, new CPU benchmark. Existing vowel/velum mappings were not changed, so no new nasal/range scans were required.
 
 Parent integration, from the project root with its existing `engine/` fork and `sdk/Rack-SDK`:
 
@@ -66,3 +68,5 @@ cargo run --release --example beatbox -- /tmp/phona-beats
 ```
 
 No dependency installation is needed. This worktree used temporary symlinks to the parent's engine and SDK. They are not part of the commit. Parent owns any live Rack installation. Listen to the six isolated WAVs and two pattern WAVs, then check gate/reset routing and panel dimming in Rack before treating this as ready for use.
+
+The ready-to-open quiet fixture is `../tests/patches/beatbox-triggers.vcv`. It starts stopped and has no Audio module. The parent renders are in `../../audition/beatbox-prototype/`; all eight WAVs passed format, non-silence, clipping, and final-tail checks.

@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SCHEMA = json.loads((ROOT / 'schema.json').read_text())
 
-def patch(held=False):
+def patch(held=False, beat=False):
     modules = []
     def module(model, pos, changes=None, data=None):
         schema = SCHEMA[model]
@@ -20,22 +20,25 @@ def patch(held=False):
         modules.append(m)
         return m['id']
     pitches=[0,2/12,4/12,5/12,7/12,9/12,11/12,1]
-    seq=module('SEQ3',[0,0],{0:0, **{4+i:v for i,v in enumerate(pitches)},
+    seq=module('SEQ3',[0,0],{0:2 if beat else 0, **{4+i:v for i,v in enumerate(pitches)},
                **{12+i:v for i,v in enumerate([0,10,10,0,10,10,10,0])}},
                dict(running=False,gates=[1]*8,clockPassthrough=False))
-    voice=module('Phona',[24,0],{2:0.547,14:0,15:0,13:0},dict(lyrics='doh ray mee fah soh lah tee doh'))
+    voice=module('Phona',[24,0],{2:0.547,14:0,15:0,13:0},dict(lyrics='B t Pf t B . Pf t' if beat else 'doh ray mee fah soh lah tee doh', beatbox=beat))
     lfo=module('LFO',[46,0],{0:0,2:-3})
     osc=module('VCO',[58,0],{2:-12})
     vca=module('VCA',[69,0],{0:0,1:0})
     mode='HELD: CV 2 -> GATE. Steps 2-3 and 5-7 hold one syllable across pitch changes.' if held else 'TRIGGERS: TRIG -> GATE. Eight short gates per cycle; first trigger at D3.'
     module('Notes',[0,1],data=dict(text='PHONA / QUIET ACCEPTANCE\nNo Audio module. VCA levels = 0.\nSEQ-3 is STOPPED. Press RESET, then RUN.\n'+mode+'\nCV 1: C D E F G A B C (C3 base). First RUN advances to step 2.\nRESET out -> Phona RESET.\nLFO sine -> VOWEL and NASAL; amounts start at 0.\nBODY: switch M/F on Phona.\nVCO SAW is parked: connect to EXT IN for talkbox.\nPhona OUT -> VCA channel 1.\nRead docs/live-instrument-test.md before adding Audio.\nSave changes to a COPY.'))
+    if beat:
+        modules[-1]['data']['text']='PHONA / BEATBOX PROTOTYPE\nNo Audio module. VCA levels = 0. SEQ-3 STOPPED.\nPress RESET, then RUN. Four triggers/second.\nPattern: B t Pf t B . Pf t\nB kick / Pf snare / t hat / . rest\nEach gate advances one token. RESET restarts the pattern.\nBODY changes the mouth; other knobs are inactive.\nMouth preparation delays the main hit; fast hits can cancel each other.\nRead docs/beatbox-prototype.md. Save edits to a COPY.'
     cables=[]
     def cable(out,op,inp,ip,color):
         cables.append(dict(id=len(cables)+1,outputModuleId=out,outputId=op,inputModuleId=inp,inputId=ip,color=color))
-    cable(seq,1,voice,0,'#e8b04c')
+    if not beat: cable(seq,1,voice,0,'#e8b04c')
     cable(seq,2 if held else 0,voice,12,'#d65252')
     cable(seq,15,voice,16,'#7e68b0')
-    cable(lfo,0,voice,4,'#4a9ac9'); cable(lfo,0,voice,5,'#4a9ac9')
+    if not beat:
+        cable(lfo,0,voice,4,'#4a9ac9'); cable(lfo,0,voice,5,'#4a9ac9')
     cable(voice,0,vca,2,'#55ad72')
     return dict(version='2.6.6',modules=modules,cables=cables)
 
@@ -60,8 +63,8 @@ def validate(p):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(); parser.add_argument('--check',action='store_true'); args=parser.parse_args()
-    for held,name in [(False,'singing-triggers.vcv'),(True,'singing-held.vcv')]:
-        p=patch(held); validate(p); text=json.dumps(p,indent=2)+'\n'; file=ROOT/name
+    for held,beat,name in [(False,False,'singing-triggers.vcv'),(True,False,'singing-held.vcv'),(False,True,'beatbox-triggers.vcv')]:
+        p=patch(held,beat); validate(p); text=json.dumps(p,indent=2)+'\n'; file=ROOT/name
         if args.check: assert file.read_text()==text, f'{name}: regenerate fixture'
         else: file.write_text(text)
         print(f'PASS {name}: schema, routing, stopped transport, zero output gain')
