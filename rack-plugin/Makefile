@@ -29,3 +29,20 @@ include $(RACK_DIR)/plugin.mk
 share: dist
 	mkdir -p share
 	cd dist && tar --no-xattrs --uid 0 --gid 0 --uname "" --gname "" -c $(SLUG) | zstd -$(ZSTD_COMPRESSION_LEVEL) -f -o ../share/"$(SLUG)"-"$(VERSION)"-$(ARCH_NAME).vcvplugin
+
+# Signed and notarized package (Apple Developer ID). Needs the certificate in the keychain and a notarytool
+# keychain profile. Override with SIGN_IDENTITY=... NOTARY_PROFILE=... . A bare dylib cannot be stapled, so
+# Gatekeeper checks the ticket online. Output: share/<slug>-<version>-<arch>.vcvplugin (replaces the unsigned one)
+SIGN_IDENTITY ?= Developer ID Application: Rob Schoen
+NOTARY_PROFILE ?= framedl-notary
+.PHONY: notarize
+notarize: dist
+	codesign --force --options runtime --timestamp --sign "$(SIGN_IDENTITY)" dist/$(SLUG)/$(TARGET)
+	codesign --verify --strict --verbose=2 dist/$(SLUG)/$(TARGET)
+	rm -f dist/notarize.zip
+	cd dist && ditto -c -k --keepParent $(SLUG) notarize.zip
+	xcrun notarytool submit dist/notarize.zip --keychain-profile "$(NOTARY_PROFILE)" --wait | tee dist/notarize.txt
+	grep -q "status: Accepted" dist/notarize.txt
+	rm -f dist/notarize.zip
+	mkdir -p share
+	cd dist && tar --no-xattrs --uid 0 --gid 0 --uname "" --gname "" -c $(SLUG) | zstd -$(ZSTD_COMPRESSION_LEVEL) -f -o ../share/"$(SLUG)"-"$(VERSION)"-$(ARCH_NAME).vcvplugin

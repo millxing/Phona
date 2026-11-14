@@ -16,7 +16,7 @@ by Jameson Hodge (MIT). Phona puts the engine in a Rack module.
 3. Restart Rack.
 
 Requirements: VCV Rack 2, macOS 11 or later, Apple Silicon. There is no Intel Mac, Windows or Linux build yet.
-The build does not have an Apple developer signature.
+The build is signed with an Apple Developer ID and notarized by Apple.
 
 ## Modules
 
