@@ -65,6 +65,12 @@ user's forum handle, Spunoza (`plugin.json`, `LICENSE`); `LICENSE` also carries 
 Pronouncing Dictionary, embedded since lyrics mode; the Makefile's `LICENSE*` wildcard packs it). Only mac-arm64
 exists so far.
 
+**Signed release (since 2.2.0):** `make notarize` builds `dist`, signs `plugin.dylib` with the Developer ID
+certificate (hardened runtime, timestamp), notarizes it with the keychain profile `framedl-notary` (shared with
+VoiceStudio), and writes the signed `share/` package. A bare dylib cannot be stapled; Gatekeeper checks online.
+Rack's own unpacking does not copy the quarantine flag to the extracted files (checked 2026-11-14), so the
+signature matters mainly for users who unpack the package by hand.
+
 ## Lyrics mode (branch `lyrics`, 2026-11-10, not committed)
 
 Why: the user compared Phona with the engine's web app (https://chimera-vocal-synth.vercel.app/), which sings
