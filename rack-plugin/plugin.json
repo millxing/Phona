@@ -1,7 +1,7 @@
 {
   "slug": "Phona",
   "name": "Phona",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "license": "MIT",
   "brand": "Phona",
   "author": "Spunoza",
@@ -24,6 +24,18 @@
       "name": "Phona Lab",
       "description": "Tuning tool for Phona's sung consonants: put it next to a Phona, turn the knobs, copy the values",
       "tags": ["Utility", "Expander"]
+    },
+    {
+      "slug": "PhonaView",
+      "name": "Phona View",
+      "description": "Animated mouth and throat: put it next to a Phona (or its Phona Lab) to see the voice's vocal tract, airflow and vocal folds",
+      "tags": ["Visual", "Expander"]
+    },
+    {
+      "slug": "PhonaScope",
+      "name": "Phona Scope",
+      "description": "Instrument display: put it next to a Phona (or its other expanders) to see the voice's spectrum, formants, tract area, glottal waveform and vowel chart",
+      "tags": ["Visual", "Expander"]
     }
   ]
 }

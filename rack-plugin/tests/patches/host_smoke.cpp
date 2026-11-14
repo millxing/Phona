@@ -92,6 +92,7 @@ int main(int argc,char**argv) { try {
  std::cout<<"PASS recall, finite output, fault light, zero VCA, gate/pitch sequence: edges="<<edges<<" peak="<<peak<<" V RMS="<<sqrt(energy/runFrames)<<" V\n";
  // One-sample retriggers and reset offsets: audio/fault checks, not syllable identity.
  wires.clear();
+ double firstBurst=0;
  for(int offset : {0,2,30,60}) {
   voice->inputs[12].setVoltage(0);voice->inputs[16].setVoltage(0);
   for(int n=0;n<48000;n++)tick();
@@ -102,9 +103,9 @@ int main(int argc,char**argv) { try {
    float x=tick();burst+=x*x;
   }
   if(beat && offset==60) {
-   // A reset outside the 1ms window cancels the preparing hit. The next edge
-   // must start token one, rather than expecting the cancelled hit to sound.
-   require(burst<0.01,"late beat reset did not cancel preparation");
+   // A reset outside the 1ms window comes after the hit has started (the fitted beat
+   // sounds have a short lead-in): it must cut the hit short, and the next edge must sound.
+   require(burst<0.5*firstBurst,"late beat reset did not cut the hit");
    double next=0;
    for(int n=0;n<24000;n++) {
     voice->inputs[12].setVoltage(n==0?10:0);
@@ -112,6 +113,7 @@ int main(int argc,char**argv) { try {
    }
    require(next>0.01,"beat after late reset stayed silent");
   } else require(burst>0.01,"one-sample gate produced no audio");
+  if(offset==0) firstBurst=burst;
  }
  std::cout<<"PASS one-sample gates with reset offsets 0/2/30/60 samples (audio/fault only)\n";
  // Body swap under a held gate, then slow CV and external excitation.

@@ -15,6 +15,18 @@ replacement. See [beatbox details](docs/beatbox-prototype.md) and
 VOWEL dims during lyrics; ineffective controls dim during beatbox. Save data adds `beatbox`
 without changing parameter/input IDs; old patches load in Lyrics mode.
 
+**Polyphony (2026-11-13, not committed).** Menu "Polyphony (max voices)" 1–4, default 1, saved as
+`voices` (older patches load mono). Sounding voices = channel count of V/OCT or GATE, up to the max.
+All CV inputs and EXT IN are per channel (a mono cable feeds every voice); the panel shows voice 1.
+OUT is polyphonic (one channel per voice, each at the mono level; no mono mix). Changing the max
+rebuilds all voices on the worker. Lyrics use one shared syllable counter: gates that open within
+20 ms (`CHORD_WINDOW`) sing the same syllable; a voice cannot join its own chord. Beatbox stays mono
+(voice 1, one output channel). Test: `tests/poly.sh` (44.1/48/96 kHz); measured ~8% of one core per
+sounding voice in that harness. Installed 2026-11-13 together with the beat-fit sounds (user
+auditioned them: "good enough for now"). Rollback: `share/rollback/Phona-before-poly-mac-arm64.vcvplugin`.
+The fitted hits start ~1 ms after the gate, so a reset 60 samples late now cuts a hit instead of
+cancelling its preparation; `tests/patches/host_smoke.cpp` checks that.
+
 See [overnight report](docs/overnight-progress-2026-11-13.md) for integration, installed-build
 status, verification, remaining risks, and next steps. No new listening verdict is claimed.
 
@@ -157,6 +169,38 @@ The user: "pop comes out fine, but then there is this higher pitch blip afterwar
 then about 25 ms of hiss near 6 kHz. Wider fold opening (abduction 0.4 to 1.0) changed nothing, so it is not
 voicing. `soften_release` sets the breath target of the note-off plan to `CODA_STOP_BREATH` (0.5) for
 syllables that end in p, t, k, tʃ. Not confirmed by ear that the hiss is the blip the user means.
+
+### Phona View and Phona Scope: display expanders (2026-11-13, released in 2.2.0)
+
+Two expanders with no audio and no cables. Shared parts: `src/PhonaTap.hpp` (module base, triple
+buffer, `familyNear`), `src/vector.hpp` (vector-display palette and glow lines), `src/TapWidgets.hpp`
+(VOICE selector: F = the voice whose gate opened last, or 1-4), panels from `tools/panel_view.py`.
+- **Phona View** (14 HP, `src/PhonaView.cpp`): the animated mouth and throat, a port of
+  `engine/src/ui/render/anatomy.ts` and `profile.ts` to NanoVG. Airway lit by sound pressure,
+  airflow streaks, nasal glow with the velum port, sparks at every turbulence source (the web view
+  shows only the loudest, which for [s] is the open glottis), the folds seen from above (gap =
+  abduction, blur = vibration), syllable and phoneme (gesture label, IPA, DejaVuSans).
+- **Phona Scope** (20 HP, `src/PhonaScope.cpp`): readouts (pitch, note, lung pressure, level,
+  voicing, open quotient, nasal port, narrowest area); output spectrum (FFT of the voice's last 4096
+  samples, UI thread) with the tract's response and F1-F4 drawn over it; the area function as a tube
+  lit by sound pressure, with the nose branch and noise sources; glottal area and flow over two
+  cycles; F1/F2 vowel chart with a trail and Hillenbrand (1995) reference vowels per body.
+  The response is a lossy chain-matrix model of the snapshot's sections with the nose as a side
+  branch (11 cm, 2.5 cm2), not the engine's own filter. Measured formants: male [i] 261/2360,
+  [a] 704/1376, [u] 286/910 Hz; female [i] 366/2773, [a] 816/1614, [u] 371/1016 Hz.
+- Data: `rust/src/vis.rs` `chim_vis_capture` copies the engine frame and telemetry into a fixed
+  `ChimVis` (C struct in `chimera_rack.h`; keep the two layouts the same). No allocation (in
+  `audio_path_does_not_allocate`); `ChimVoice::vis_tele` is filled once in `chim_new`.
+- Phona (`captureTaps`) finds each display, also through a chain of Phona expanders on either side,
+  and sends 40 snapshots/s. One capture per voice per round serves both displays (a capture resets
+  the engine's pressure averages). Phona keeps the last 4096 output samples per voice only while a
+  display is attached. Phona Lab is also found through the displays.
+- Beatbox mode is not shown (the beat sounds come from separate `BeatVoice` engines).
+- Test: `sh tests/view.sh` (both modules: links and chains, voice choice, 40 snapshots/s, CPU,
+  syllable/phoneme, nasal port, oral hiss, fold gap, formants per vowel and body, spectrum peak on a
+  harmonic). `VIEW_SVG_DIR=<dir> sh tests/view.sh` records the real drawing calls into SVG files
+  (`tests/nvg_record.hpp`; convert with `qlmanage -t -s 1000 -o <dir> <file>.svg`).
+- The user checked Phona View live in Rack ("works awesome"). Phona Scope is not yet checked live.
 
 ### Phona Lab: tuning module (2026-11-10)
 

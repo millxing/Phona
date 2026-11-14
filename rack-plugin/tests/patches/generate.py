@@ -23,7 +23,7 @@ def patch(held=False, beat=False):
     seq=module('SEQ3',[0,0],{0:2 if beat else 0, **{4+i:v for i,v in enumerate(pitches)},
                **{12+i:v for i,v in enumerate([0,10,10,0,10,10,10,0])}},
                dict(running=False,gates=[1]*8,clockPassthrough=False))
-    voice=module('Phona',[24,0],{2:0.547,14:0,15:0,13:0},dict(lyrics='B t Pf t B . Pf t' if beat else 'doh ray mee fah soh lah tee doh', beatbox=beat))
+    voice=module('Phona',[24,0],{2:0.547,14:0,15:0,13:0},dict(lyrics='B t Pf t B . Pf t' if beat else 'doh ray mee fah soh lah tee doh', beatbox=beat, voices=1))
     lfo=module('LFO',[46,0],{0:0,2:-3})
     osc=module('VCO',[58,0],{2:-12})
     vca=module('VCA',[69,0],{0:0,1:0})

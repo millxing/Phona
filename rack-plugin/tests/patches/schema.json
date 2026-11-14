@@ -838,7 +838,7 @@
     "inputs": [
       {
         "id": 0,
-        "name": "1V/octave pitch"
+        "name": "1V/octave pitch (polyphonic: one channel per voice)"
       },
       {
         "id": 1,
@@ -886,7 +886,7 @@
       },
       {
         "id": 12,
-        "name": "Gate / breath envelope (0.1-10V; unpatched = always on)"
+        "name": "Gate / breath envelope (0.1-10V; unpatched = always on; polyphonic)"
       },
       {
         "id": 13,
@@ -908,12 +908,13 @@
     "outputs": [
       {
         "id": 0,
-        "name": "Voice"
+        "name": "Voice (polyphonic: one channel per voice)"
       }
     ],
     "data": {
       "lyrics": "",
-      "beatbox": false
+      "beatbox": false,
+      "voices": 1
     }
   }
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include "plugin.hpp"
 #include "chimera_rack.h"
+#include "PhonaTap.hpp"
 
 // Phona Lab: a tuning tool, not an instrument. Put it next to a Phona and its knobs set how that
 // Phona makes the consonants of its lyrics (the tunable values, T_* in rust/src/lib.rs). The
@@ -76,7 +77,8 @@ struct PhonaLab : Module {
 	static bool isPhona(Module* m) { return m && m->model == modelPhona; }
 
 	void process(const ProcessArgs& args) override {
-		bool linked = isPhona(leftExpander.module) || isPhona(rightExpander.module);
+		// next to a Phona, or with other Phona expanders between (Phona | View | Lab)
+		bool linked = familyNear(this, modelPhona) != nullptr;
 		lights[LINK_LIGHT].setBrightnessSmooth(linked ? 1.f : 0.f, args.sampleTime);
 	}
 

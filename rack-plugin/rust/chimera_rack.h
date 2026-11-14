@@ -45,6 +45,39 @@ void chim_set_lyrics(ChimVoice* v, int on);
 /* Gate opened / closed in lyrics mode: sing syllable i, end the syllable. Real-time safe. */
 void chim_note_on(ChimVoice* v, const ChimLyrics* l, size_t i);
 void chim_note_off(ChimVoice* v);
+/* Phona View: a snapshot of one voice's anatomy (midsagittal outlines, body cm, x forward, y up,
+   glottis near the origin) and sound. Layout must match `ChimVis` in vis.rs. */
+#define CHIM_VIS_PTS 96
+#define CHIM_VIS_GRID 64
+#define CHIM_VIS_NODES 64
+#define CHIM_VIS_SCOPE 128
+#define CHIM_VIS_NOISE 6
+enum { CHIM_VIS_OUTER, CHIM_VIS_INNER, CHIM_VIS_TONGUE, CHIM_VIS_VELUM, CHIM_VIS_UPPER_LIP, CHIM_VIS_LOWER_LIP,
+	CHIM_VIS_UPPER_TEETH, CHIM_VIS_LOWER_TEETH, CHIM_VIS_JAW_BONE, CHIM_VIS_EPIGLOTTIS, CHIM_VIS_NASAL, CHIM_VIS_LINES };
+typedef struct ChimVisLine { int n; float x[CHIM_VIS_PTS]; float y[CHIM_VIS_PTS]; } ChimVisLine;
+typedef struct ChimVis {
+	int valid;
+	float scale, pharynx, jaw, larynx;  /* body size, pharynx scale; jaw and larynx articulators */
+	float glottis[2], tongue_center[2], tongue_radius, tip[2];
+	float lip_s, velum_port, lip_area;  /* cm from glottis, cm2, cm2 */
+	ChimVisLine line[CHIM_VIS_LINES];
+	int n_grid;                         /* cross-section lines of the airway */
+	float g_in_x[CHIM_VIS_GRID], g_in_y[CHIM_VIS_GRID], g_out_x[CHIM_VIS_GRID], g_out_y[CHIM_VIS_GRID], g_s[CHIM_VIS_GRID], g_area[CHIM_VIS_GRID];
+	int n_nodes;                        /* tube sections: position, area, pressure RMS (dyn/cm2), flow (cm3/s) */
+	float node_s[CHIM_VIS_NODES], node_area[CHIM_VIS_NODES], pressure[CHIM_VIS_NODES], flow[CHIM_VIS_NODES];
+	int n_noise;                        /* turbulence sources: amplitude, cm from glottis */
+	float noise_level[CHIM_VIS_NOISE], noise_s[CHIM_VIS_NOISE];
+	float f0, voicing, p_lung, out_rms, gate, abduction;
+	int n_scope;                        /* glottal area over the last two cycles */
+	float glottal_area[CHIM_VIS_SCOPE], glottal_flow[CHIM_VIS_SCOPE]; /* cm2, cm3/s */
+	int n_ph;                           /* the first n_ph nodes are the pharynx, the rest the mouth */
+	float ph_len, or_len;               /* cm */
+	char phoneme[24];                   /* UTF-8 (IPA) speech sound being made, "" = none */
+} ChimVis;
+/* Real-time safe. Returns 1 and sets out->valid when there is a frame to show. */
+int chim_vis_capture(ChimVoice* v, ChimVis* out);
+/* A resting voice (no sound data). Allocates: never on the audio thread. */
+int chim_vis_rest(double female, ChimVis* out);
 #ifdef __cplusplus
 }
 #endif

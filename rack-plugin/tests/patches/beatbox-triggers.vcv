@@ -312,7 +312,8 @@
       ],
       "data": {
         "lyrics": "B t Pf t B . Pf t",
-        "beatbox": true
+        "beatbox": true,
+        "voices": 1
       }
     },
     {

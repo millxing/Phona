@@ -2,6 +2,7 @@
 #include "chimera_rack.h"
 #include "panel.hpp"
 #include "PhonaLab.hpp"
+#include "PhonaTap.hpp"
 #include <atomic>
 #include <thread>
 #include <mutex>
@@ -9,12 +10,14 @@
 #include <sstream>
 #include <array>
 
-// Prototype singing voice. One Chimera voice per module (monophonic).
+// Prototype singing voice. Up to MAX_VOICES Chimera voices per module (polyphony). The menu sets
+// the maximum; the channel count of the V/OCT or GATE cable sets how many voices sound.
 //
-// Real-time rules: the audio thread only calls chim_set / chim_render. Building a voice (sample
-// rate or body change) allocates, so a worker thread builds it and hands it over through an
-// atomic pointer; the old voice goes back to the worker to be freed.
+// Real-time rules: the audio thread only calls chim_set / chim_render. Building voices (sample
+// rate, body or voice-count change) allocates, so a worker thread builds them and hands them over
+// through an atomic pointer; the old voices go back to the worker to be freed.
 struct Phona : Module {
+	static constexpr int MAX_VOICES = 4;
 	enum ParamId {
 		// pitch group
 		PITCH_PARAM, FINE_PARAM, GLIDE_PARAM, VIBDEPTH_PARAM, VIBRATE_PARAM,
@@ -43,11 +46,25 @@ struct Phona : Module {
 	// A gate input below this voltage is closed (a small DC offset must not hold the voice open).
 	static constexpr float GATE_THRESHOLD = 0.1f;
 
-	// A voice plus what it was built for. Immutable once published.
+	// The voices plus what they were built for. Immutable once published.
 	struct Built {
-		ChimVoice* voice;
+		ChimVoice* voice[MAX_VOICES];
+		int n; // voices built (the menu's maximum when it was built)
 		int body;
 		float rate;
+	};
+	// Audio-thread state of one voice
+	struct Lane {
+		bool lyr = false;      // lyrics mode as last sent to this voice
+		bool lyrGate = false;  // gate state at the last sample (lyrics and beat edges)
+		int lyrDelay = 0;      // samples until a gate that opened starts its syllable
+		float lastGate = 0.f;
+		int gateHold = 0;      // samples a gate onset is held open so the engine's control tick sees it
+		float heldGate = 0.f;
+		float silentFor = 0.f; // seconds of silence with gate closed
+		bool idle = false;
+		bool dead = false;     // this voice hit a panic / non-finite output
+		char syllable[32] = {}; // the syllable this voice sings, for Phona View
 	};
 
 	// Lyrics turned into syllable plans, for one body. Built by the worker (it allocates), handed
@@ -60,6 +77,7 @@ struct Phona : Module {
 		int body;
 		int n;
 		bool keep; // same text and body as the build before (only the Lab's values changed): the song goes on
+		std::vector<std::array<char, 32>> texts; // each syllable's spelling, for Phona View (audio thread reads)
 	};
 	std::mutex lyricsMutex;                // guards `lyrics` and `sylTexts` (UI and worker threads only)
 	std::string lyrics;
@@ -83,11 +101,25 @@ struct Phona : Module {
 	std::atomic<BuiltLyr*> lyrOutgoing{nullptr};
 	std::atomic<bool> lyricsShown{false};  // lyrics mode in use, for the panel
 	std::atomic<int> sylShown{0};          // syllable being sung
-	bool voiceLyr = false;                 // lyrics mode as last sent to the active voice
-	bool lyrGate = false;
-	int lyrDelay = 0;                      // samples until a gate that opened starts its syllable
-	int syl = 0;                           // next syllable
+	int syl = 0;                           // next syllable (one counter for all voices)
+	// Gates that open together (a chord) sing the same syllable: the first voice starts a chord
+	// window; another voice that starts inside it, and is not yet in the chord, joins it.
+	static constexpr float CHORD_WINDOW = 0.02f; // seconds
+	int chordLeft = 0;                     // samples left in the chord window
+	int chordSyl = 0;
+	unsigned chordMask = 0;                // voices already in the chord
 	dsp::SchmittTrigger resetTrigger;
+	std::atomic<int> polyMax{1};           // menu: maximum voices (1..MAX_VOICES)
+	Lane lanes[MAX_VOICES];
+	// Display expanders (Phona View, Phona Scope): the voice whose note started last, samples until
+	// the next snapshots, each voice's recent output, and this round's captures
+	int newestVoice = 0;
+	int viewCtr = 0;
+	static constexpr int TAP_N = PhonaTap::AUDIO_N; // a power of two
+	float tapRing[MAX_VOICES][TAP_N] = {};
+	unsigned tapPos = 0;
+	bool tapsOn = false; // a display expander was found at the last round: record the output
+	ChimVis tapVis[MAX_VOICES];
 
 	Built* active = nullptr;               // owned by the audio thread
 	std::atomic<Built*> incoming{nullptr}; // published by worker, taken by audio thread
@@ -98,17 +130,11 @@ struct Phona : Module {
 	std::atomic<bool> buildFailed{false};
 	std::atomic<float> sourceShown{0.f};     // external share in use (knob + CV), for the panel's grey-out
 	std::atomic<float> modShown[PARAMS_LEN] = {}; // knob + CV per param, for the panel's modulation marks
-	std::atomic<bool> rebuildRequest{false}; // audio thread: the active voice died, build a new one
-	bool dead = false;          // active voice hit a panic / non-finite output
-	bool faultReported = false; // rebuildRequest already sent for this voice
+	std::atomic<bool> rebuildRequest{false}; // audio thread: an active voice died, build new ones
+	bool faultReported = false; // rebuildRequest already sent for these voices
 	std::thread worker;
 
 	int ctrl = 0;
-	float silentFor = 0.f;  // seconds of silence with gate closed
-	bool idle = false;
-	float lastGate = 0.f;
-	int gateHold = 0;       // samples a gate onset is held open so the engine's control tick sees it
-	float heldGate = 0.f;
 
 	Phona() {
 		config(PARAMS_LEN, INPUTS_LEN, OUTPUTS_LEN, LIGHTS_LEN);
@@ -147,13 +173,13 @@ struct Phona : Module {
 		configParam(SOURCE_PARAM, 0.f, 1.f, 1.f, "Source (vocal folds .. external input)", "%", 0.f, 100.f);
 		configInput(SOURCE_INPUT, "Source CV (10V = full knob range)");
 		configInput(EXT_INPUT, "External sound (replaces the vocal folds; no effect when unpatched)");
-		configInput(VOCT_INPUT, "1V/octave pitch");
-		configInput(GATE_INPUT, "Gate / breath envelope (0.1-10V; unpatched = always on)");
+		configInput(VOCT_INPUT, "1V/octave pitch (polyphonic: one channel per voice)");
+		configInput(GATE_INPUT, "Gate / breath envelope (0.1-10V; unpatched = always on; polyphonic)");
 		const char* cvNames[] = {nullptr, "Glide", "Vibrato depth", "Vibrato rate", "Vowel", "Nasal", "Larynx", "Tension", "Brightness", "Breathiness", "Roughness", "Fry"};
 		for (int i = GLIDE_INPUT; i <= FRY_INPUT; i++)
 			configInput(i, std::string(cvNames[i]) + " CV (10V = full knob range)");
 		configInput(RESET_INPUT, "Reset (lyrics start again at the first syllable)");
-		configOutput(AUDIO_OUTPUT, "Voice");
+		configOutput(AUDIO_OUTPUT, "Voice (polyphonic: one channel per voice)");
 		worker = std::thread([this] { work(); });
 	}
 
@@ -207,11 +233,14 @@ struct Phona : Module {
 	json_t* dataToJson() override {
 		json_t* root = json_object();
 		json_object_set_new(root, "beatbox", json_boolean(beatMode.load()));
+		json_object_set_new(root, "voices", json_integer(polyMax.load()));
 		json_object_set_new(root, "lyrics", json_string(getLyrics().c_str()));
 		return root;
 	}
 	void dataFromJson(json_t* root) override {
 		setBeatMode(json_is_true(json_object_get(root, "beatbox")));
+		json_t* v = json_object_get(root, "voices");
+		setPolyMax(v && json_is_integer(v) ? (int) json_integer_value(v) : 1); // older patches: mono
 		json_t* l = json_object_get(root, "lyrics");
 		if (l && json_is_string(l)) setLyrics(json_string_value(l));
 	}
@@ -219,17 +248,23 @@ struct Phona : Module {
 		Module::onReset(e);
 		setBeatMode(false);
 		setLyrics("");
+		setPolyMax(1);
+	}
+
+	// UI thread: maximum voices. The worker builds that many; the old voices sound until they arrive.
+	void setPolyMax(int n) {
+		polyMax = clamp(n, 1, MAX_VOICES);
 	}
 
 	static void destroy(Built* b) {
 		if (!b) return;
-		chim_free(b->voice);
+		for (int i = 0; i < b->n; i++) chim_free(b->voice[i]);
 		delete b;
 	}
 
 	// Worker: builds whatever the audio thread currently wants, retries failures with backoff.
 	void work() {
-		int builtBody = -1;
+		int builtBody = -1, builtN = 0;
 		float builtRate = 0.f;
 		int backoff = 0;
 		int builtLyrVersion = -1, builtLyrBody = -1, builtTune = 0;
@@ -262,7 +297,12 @@ struct Phona : Module {
 					sylTexts = texts;
 				}
 				bool keep = lv == builtLyrVersion && b == builtLyrBody;
-				BuiltLyr* fresh = new BuiltLyr{l, {}, beat, lv, b, n, keep};
+				BuiltLyr* fresh = new BuiltLyr{l, {}, beat, lv, b, n, keep, {}};
+				for (const std::string& t : texts) {
+					std::array<char, 32> a{};
+					std::strncpy(a.data(), t.c_str(), a.size() - 1);
+					fresh->texts.push_back(a);
+				}
 				if (beat) {
 					std::istringstream in(text);
 					std::string token;
@@ -281,21 +321,30 @@ struct Phona : Module {
 				builtLyrBody = b;
 			}
 			float r = desiredRate.load();
+			int nv = polyMax.load();
 			// the active voice died: build a replacement, but not more often than once per second
 			if (rebuildRequest.exchange(false)) {
 				builtBody = -1;
 				backoff = 200;
 			}
 			if (backoff > 0) backoff--;
-			else if (r > 0.f && (b != builtBody || r != builtRate)) {
-				ChimVoice* v = chim_new(r, b == 1 ? 1.0 : 0.0, 0.0);
-				if (v) {
+			else if (r > 0.f && (b != builtBody || r != builtRate || nv != builtN)) {
+				Built* fresh = new Built{{}, 0, b, r};
+				bool ok = true;
+				for (int i = 0; i < nv && ok; i++) {
+					fresh->voice[i] = chim_new(r, b == 1 ? 1.0 : 0.0, 0.0);
+					ok = fresh->voice[i] != nullptr;
+					if (ok) fresh->n++;
+				}
+				if (ok) {
 					builtBody = b;
 					builtRate = r;
+					builtN = nv;
 					buildFailed = false;
-					destroy(incoming.exchange(new Built{v, b, r})); // a stale unclaimed build is dropped
+					destroy(incoming.exchange(fresh)); // a stale unclaimed build is dropped
 				}
 				else {
+					destroy(fresh);
 					buildFailed = true;
 					backoff = 100; // ~0.5 s
 				}
@@ -311,32 +360,91 @@ struct Phona : Module {
 		desiredRate = e.sampleRate; // the worker rebuilds; process() mutes until it arrives
 	}
 
-	// knob + CV. 10V spans the knob's full range; `att` is an optional attenuverter param (-1..1).
-	float knobCv(int param, int input, int att = -1) {
+	// knob + CV for voice `c`. 10V spans the knob's full range; `att` is an optional attenuverter
+	// param (-1..1). The panel shows voice 1.
+	float knobCv(int param, int input, int att, int c) {
 		ParamQuantity* q = paramQuantities[param];
 		float amount = att >= 0 ? params[att].getValue() : 1.f;
-		float v = params[param].getValue() + amount * inputs[input].getVoltage() / 10.f * (q->maxValue - q->minValue);
+		float v = params[param].getValue() + amount * inputs[input].getPolyVoltage(c) / 10.f * (q->maxValue - q->minValue);
 		v = clamp(v, q->minValue, q->maxValue);
-		modShown[param] = v;
+		if (c == 0) modShown[param] = v;
 		return v;
+	}
+
+	// No voice other than `except` holds a syllable (so none of them reads the old lyrics).
+	bool lyricsIdle(int except = -1) {
+		for (int c = 0; c < active->n; c++)
+			if (c != except && !chim_lyrics_idle(active->voice[c])) return false;
+		return true;
+	}
+
+	// Next syllable for voice `c` (of `n`): the chord's syllable if the voice joins a chord,
+	// else the next one in the lyrics (it starts a new chord).
+	int pickSyllable(int c, int n, float sampleRate) {
+		if (chordLeft > 0 && !(chordMask & (1u << c)) && chordSyl < n) {
+			chordMask |= 1u << c;
+			return chordSyl;
+		}
+		if (syl >= n) syl = 0;
+		chordSyl = syl;
+		chordMask = 1u << c;
+		chordLeft = std::max(1, (int) (sampleRate * CHORD_WINDOW));
+		syl = (syl + 1) % n;
+		return chordSyl;
+	}
+
+	// The display expanders beside this module (also behind other Phona expanders): about 40
+	// times a second, a snapshot of the voice each one shows goes into its triple buffer. A voice
+	// is captured once per round, also when both show it (a capture resets the engine's telemetry
+	// averages). Allocation-free.
+	void captureTaps(float sampleRate, int nOut, bool lyr, bool beat) {
+		if (--viewCtr > 0) return;
+		viewCtr = std::max(1, (int) (sampleRate / 40.f));
+		PhonaTap* taps[2] = {(PhonaTap*) familyNear(this, modelPhonaView), (PhonaTap*) familyNear(this, modelPhonaScope)};
+		tapsOn = taps[0] || taps[1];
+		if (!tapsOn || !active) return;
+		unsigned got = 0;
+		for (PhonaTap* t : taps) {
+			if (!t) continue;
+			int want = (int) t->params[PhonaTap::VOICE_PARAM].getValue();
+			int c = clamp(want <= 0 ? newestVoice : want - 1, 0, active->n - 1);
+			if (!(got & (1u << c))) {
+				chim_vis_capture(active->voice[c], &tapVis[c]);
+				got |= 1u << c;
+			}
+			PhonaTap::Frame& f = t->writeSlot();
+			std::memcpy(&f.vis, &tapVis[c], sizeof(ChimVis));
+			unsigned p = tapPos & (TAP_N - 1); // oldest sample first
+			std::memcpy(f.audio, &tapRing[c][p], (TAP_N - p) * sizeof(float));
+			std::memcpy(f.audio + (TAP_N - p), tapRing[c], p * sizeof(float));
+			f.rate = sampleRate;
+			f.voice = c;
+			f.voices = active->n;
+			f.sounding = beat ? 1 : nOut;
+			f.lyrics = lyr;
+			f.beat = beat;
+			f.female = active->body == 1;
+			if (lyr) std::memcpy(f.syllable, lanes[c].syllable, sizeof(f.syllable));
+			else f.syllable[0] = 0;
+			t->publish();
+		}
 	}
 
 	void process(const ProcessArgs& args) override {
 		int b = (int) params[BODY_PARAM].getValue();
 		desiredBody = b;
 		desiredRate = args.sampleRate;
+		int wantN = polyMax.load();
 
-		// take a newly built voice only when the hand-back slot is free (old voice must go to the worker)
+		// take newly built voices only when the hand-back slot is free (old voices must go to the worker)
 		if (outgoing.load() == nullptr) {
 			if (Built* n = incoming.exchange(nullptr)) {
-				if (n->body == b && n->rate == args.sampleRate) {
+				if (n->body == b && n->rate == args.sampleRate && n->n == wantN) {
 					outgoing.store(active);
 					active = n;
-					voiceLyr = false; // a new voice starts in plain mode
+					for (Lane& L : lanes) L = Lane(); // new voices start in plain mode
 					voiceBeat = false;
 					ctrl = 0;
-					idle = false;
-					dead = false;
 					faultReported = false;
 				}
 				else {
@@ -345,18 +453,20 @@ struct Phona : Module {
 				}
 			}
 		}
-		// no voice yet, or still the old sample rate (would play at the wrong pitch): mute
+		// no voices yet, or still the old sample rate (would play at the wrong pitch): mute
 		if (!active || active->rate != args.sampleRate) {
+			outputs[AUDIO_OUTPUT].setChannels(1);
 			outputs[AUDIO_OUTPUT].setVoltage(0.f);
 			lights[STATUS_LIGHT + 0].setBrightness(0.f);
 			lights[STATUS_LIGHT + 1].setBrightness(buildFailed ? 1.f : 0.f);
 			return;
 		}
-		ChimVoice* voice = active->voice;
+		const int nv = active->n;
+		ChimVoice* const* voice = active->voice;
 
-		// New lyrics. With new text the voice must drop its pointer to the old ones before the
+		// New lyrics. With new text the voices must drop their pointers to the old ones before the
 		// worker frees them. With the same text (a Lab value changed) the song goes on: the new
-		// plans wait until no syllable is held, because only then does the voice read nothing
+		// plans wait until no syllable is held, because only then does a voice read nothing
 		// from the old ones.
 		if (lyrOutgoing.load() == nullptr) {
 			if (!lyrPending) {
@@ -368,62 +478,81 @@ struct Phona : Module {
 				lyrPending = n;
 			}
 		}
-		if (lyrPending && lyrOutgoing.load() == nullptr && (!lyrPending->keep || chim_lyrics_idle(voice))) {
+		if (lyrPending && lyrOutgoing.load() == nullptr && (!lyrPending->keep || lyricsIdle())) {
 			if (!lyrPending->keep) {
-				chim_set_lyrics(voice, 0);
-				if (voiceBeat) { chim_beat_hit(voice, 0); beatShown = -1; beatEdges.fill(false); }
-				voiceLyr = false;
+				for (int c = 0; c < nv; c++) {
+					chim_set_lyrics(voice[c], 0);
+					lanes[c].lyr = false;
+				}
+				if (voiceBeat) { chim_beat_hit(voice[0], 0); beatShown = -1; beatEdges.fill(false); }
 				syl = 0;
+				chordLeft = 0;
 			}
 			lyrOutgoing.store(activeLyr);
 			activeLyr = lyrPending;
 			lyrPending = nullptr;
 		}
-		// Lyrics mode needs syllables planned for this voice's body (after a BODY change the two
-		// arrive separately; the plain voice sounds in between).
+		// Lyrics mode needs syllables planned for these voices' body (after a BODY change the two
+		// arrive separately; the plain voices sound in between). Beatbox uses voice 1 only.
 		bool wantBeat = beatMode.load();
 		bool wantLyr = !wantBeat && activeLyr && activeLyr->l && activeLyr->n > 0 && activeLyr->body == active->body;
 		if (wantBeat != voiceBeat) {
-			chim_set_beatbox(voice, wantBeat ? 1 : 0);
+			chim_set_beatbox(voice[0], wantBeat ? 1 : 0); // also ends lyrics mode on voice 1
+			for (int c = 1; c < nv; c++) chim_set_lyrics(voice[c], 0);
 			voiceBeat = wantBeat;
 			beatEdges.fill(false);
-			voiceLyr = false;
-			lyrGate = inputs[GATE_INPUT].getVoltage() >= GATE_THRESHOLD; // require a fresh edge
-			lyrDelay = 0;
+			for (Lane& L : lanes) {
+				L.lyr = false;
+				L.lyrGate = false;
+				L.lyrDelay = 0;
+				L.idle = false;
+			}
+			lanes[0].lyrGate = inputs[GATE_INPUT].getVoltage() >= GATE_THRESHOLD; // require a fresh edge
 			syl = 0;
+			chordLeft = 0;
 			beatShown = -1;
 			ctrl = 0;
-			idle = false;
 		}
-		if (wantLyr != voiceLyr) {
-			chim_set_lyrics(voice, wantLyr ? 1 : 0);
-			voiceLyr = wantLyr;
-			lyrGate = false;
-			lyrDelay = 0;
+		for (int c = 0; c < nv; c++) {
+			if (wantLyr == lanes[c].lyr) continue;
+			chim_set_lyrics(voice[c], wantLyr ? 1 : 0);
+			lanes[c].lyr = wantLyr;
+			lanes[c].lyrGate = false;
+			lanes[c].lyrDelay = 0;
 		}
 		lyricsShown = wantLyr || wantBeat;
 		if (resetTrigger.process(inputs[RESET_INPUT].getVoltage(), 0.1f, 1.f)) {
 			syl = 0;
-			if (wantBeat) { chim_beat_hit(voice, 0); beatShown = -1; }
+			chordLeft = 0;
+			if (wantBeat) { chim_beat_hit(voice[0], 0); beatShown = -1; }
 		}
 
-		float gate = 1.f;
-		if (inputs[GATE_INPUT].isConnected()) {
-			float gv = inputs[GATE_INPUT].getVoltage();
-			gate = gv >= GATE_THRESHOLD ? clamp(gv / 10.f, 0.f, 1.f) : 0.f;
+		// Voices that sound: the channel count of V/OCT or GATE, up to the voices built. A voice
+		// above that count gets a closed gate; it still renders until silent, but is not output.
+		int channels = std::max(inputs[VOCT_INPUT].getChannels(), inputs[GATE_INPUT].getChannels());
+		int nOut = clamp(channels, 1, nv);
+		bool gatePatched = inputs[GATE_INPUT].isConnected();
+		float gates[MAX_VOICES];
+		for (int c = 0; c < nv; c++) {
+			gates[c] = 0.f;
+			if (c >= nOut) continue;
+			if (!gatePatched) { gates[c] = 1.f; continue; }
+			float gv = inputs[GATE_INPUT].getPolyVoltage(c);
+			gates[c] = gv >= GATE_THRESHOLD ? clamp(gv / 10.f, 0.f, 1.f) : 0.f;
 		}
 		if (wantBeat) {
 			int version = lyricsVersion.load();
 			if (version != beatVersion) {
 				beatVersion = version;
-				chim_beat_hit(voice, 0);
+				chim_beat_hit(voice[0], 0);
 				beatShown = -1;
 				beatEdges.fill(false);
 				syl = 0;
 			}
-			bool open = inputs[GATE_INPUT].isConnected() && gate > 0.f;
+			Lane& L = lanes[0];
+			bool open = gatePatched && gates[0] > 0.f;
 			unsigned slot = beatTick++ % beatEdges.size();
-			if (open && !lyrGate) {
+			if (open && !L.lyrGate) {
 				unsigned delay = (unsigned) clamp(args.sampleRate * 0.001f, 1.f, 1024.f);
 				beatEdges[(slot + delay - 1) % beatEdges.size()] = true;
 			}
@@ -438,89 +567,76 @@ struct Phona : Module {
 					syl = (syl + 1) % activeLyr->beats.size();
 				}
 				beatShown = ready ? token : -1;
-				chim_beat_hit(voice, token);
+				chim_beat_hit(voice[0], token);
 			}
-			lyrGate = open;
-			gate = 0.f; // beat gestures own breath; an unpatched gate never sings
-			gateHold = 0;
+			L.lyrGate = open;
+			// beat gestures own breath; an unpatched gate never sings; other voices are silent
+			for (int c = 0; c < nv; c++) gates[c] = 0.f;
+			L.gateHold = 0;
 		}
-		// Lyrics: each time the gate opens, the next syllable is sung; when it closes, the syllable
-		// ends (the Rust side keeps a trigger-length gate open until the vowel has sounded).
+		// Lyrics: each time a voice's gate opens, it sings the next syllable (or its chord's);
+		// when the gate closes, the syllable ends (the Rust side keeps a trigger-length gate open
+		// until the vowel has sounded).
 		if (wantLyr) {
-			bool open = gate > 0.f;
-			// The syllable starts 1 ms after the gate opens. A reset that comes with the gate can
-			// arrive some samples late (each cable adds one); without the wait, the gate would sing
-			// the old position, then the reset would make the next gate sing syllable 1 again.
-			if (open && !lyrGate) lyrDelay = std::max(1, (int) (args.sampleRate * 0.001f));
-			if (lyrDelay > 0 && --lyrDelay == 0) {
-				// Plans with new Lab values that still wait (with long consonants a syllable can
-				// be held until the next one starts, so the voice is never idle): a note-on ends
-				// the held syllable from the old plans first, so this is the other safe moment.
-				if (lyrPending && lyrPending->keep && lyrPending->l && lyrPending->n > 0 && lyrPending->body == active->body && lyrOutgoing.load() == nullptr) {
-					if (syl >= lyrPending->n) syl = 0;
-					chim_note_on(voice, lyrPending->l, syl); // reads the old plans for the last time
-					lyrOutgoing.store(activeLyr);
-					activeLyr = lyrPending;
-					lyrPending = nullptr;
+			if (chordLeft > 0) chordLeft--;
+			for (int c = 0; c < nv; c++) {
+				Lane& L = lanes[c];
+				bool open = gates[c] > 0.f;
+				// The syllable starts 1 ms after the gate opens. A reset that comes with the gate can
+				// arrive some samples late (each cable adds one); without the wait, the gate would sing
+				// the old position, then the reset would make the next gate sing syllable 1 again.
+				if (open && !L.lyrGate) L.lyrDelay = std::max(1, (int) (args.sampleRate * 0.001f));
+				if (L.lyrDelay > 0 && --L.lyrDelay == 0) {
+					// Plans with new Lab values that still wait (with long consonants a syllable can
+					// be held until the next one starts, so a voice is never idle): a note-on ends
+					// this voice's held syllable from the old plans first, so when no other voice
+					// holds one, this is the other safe moment.
+					bool swap = lyrPending && lyrPending->keep && lyrPending->l && lyrPending->n > 0
+						&& lyrPending->body == active->body && lyrOutgoing.load() == nullptr && lyricsIdle(c);
+					BuiltLyr* from = swap ? lyrPending : activeLyr;
+					int s = pickSyllable(c, from->n, args.sampleRate);
+					chim_note_on(voice[c], from->l, s); // with a swap: reads the old plans for the last time
+					if (swap) {
+						lyrOutgoing.store(activeLyr);
+						activeLyr = lyrPending;
+						lyrPending = nullptr;
+					}
+					sylShown = s;
+					if (s < (int) from->texts.size()) std::memcpy(L.syllable, from->texts[s].data(), sizeof(L.syllable));
+					if (!open) chim_note_off(voice[c]);
 				}
-				else {
-					if (syl >= activeLyr->n) syl = 0;
-					chim_note_on(voice, activeLyr->l, syl);
+				else if (!open && L.lyrGate && L.lyrDelay == 0) {
+					chim_note_off(voice[c]);
 				}
-				sylShown = syl;
-				syl = (syl + 1) % activeLyr->n;
-				if (!open) chim_note_off(voice);
+				L.lyrGate = open;
 			}
-			else if (!open && lyrGate && lyrDelay == 0) {
-				chim_note_off(voice);
-			}
-			lyrGate = open;
 		}
 		// The engine samples its gate once per 64 output samples, so a short trigger could vanish:
 		// hold an onset open for 128 samples (and send it right away).
-		if (gate > 0.f && lastGate <= 0.f) {
-			gateHold = 128;
-			heldGate = 0.f;
-			ctrl = 0;
-		}
-		lastGate = gate;
-		if (gateHold > 0) {
-			gateHold--;
-			heldGate = std::max(heldGate, gate);
-			gate = heldGate;
+		for (int c = 0; c < nv; c++) {
+			Lane& L = lanes[c];
+			float& gate = gates[c];
+			if (gate > 0.f && L.lastGate <= 0.f) {
+				newestVoice = c;
+				L.gateHold = 128;
+				L.heldGate = 0.f;
+				ctrl = 0;
+			}
+			L.lastGate = gate;
+			if (L.gateHold > 0) {
+				L.gateHold--;
+				L.heldGate = std::max(L.heldGate, gate);
+				gate = L.heldGate;
+			}
 		}
 
 		// controls at 1/16 sample rate (the engine itself updates every 64 samples)
 		if (ctrl-- <= 0) {
 			ctrl = 15;
-			ChimParams p;
-			float semis = params[PITCH_PARAM].getValue() + params[FINE_PARAM].getValue();
-			modShown[PITCH_PARAM] = params[PITCH_PARAM].getValue() + 12.f * inputs[VOCT_INPUT].getVoltage(); // the arc clamps it
-			p.f0 = dsp::FREQ_C4 * std::pow(2.f, semis / 12.f + inputs[VOCT_INPUT].getVoltage());
-			p.vowel = knobCv(VOWEL_PARAM, VOWEL_INPUT, VOWEL_ATT_PARAM);
-			p.pressure = 8.0 * knobCv(EFFORT_PARAM, EFFORT_INPUT, EFFORT_ATT_PARAM); // Rust side clamps and compensates
-			p.breathiness = knobCv(BREATHY_PARAM, BREATHY_INPUT, BREATHY_ATT_PARAM);
-			p.tension = knobCv(TENSION_PARAM, TENSION_INPUT, TENSION_ATT_PARAM);
-			p.brightness = knobCv(BRIGHT_PARAM, BRIGHT_INPUT, BRIGHT_ATT_PARAM);
-			p.roughness = knobCv(ROUGH_PARAM, ROUGH_INPUT, ROUGH_ATT_PARAM);
-			p.vib_depth = knobCv(VIBDEPTH_PARAM, VIBDEPTH_INPUT, VIBDEPTH_ATT_PARAM);
-			p.vib_rate = knobCv(VIBRATE_PARAM, VIBRATE_INPUT, VIBRATE_ATT_PARAM);
-			p.gate = gate;
-			p.glide = 0.002 * std::pow(500.f, knobCv(GLIDE_PARAM, GLIDE_INPUT, GLIDE_ATT_PARAM));
-			p.fry = knobCv(FRY_PARAM, FRY_INPUT, FRY_ATT_PARAM);
-			p.velum = -0.25 + 1.65 * knobCv(NASAL_PARAM, NASAL_INPUT, NASAL_ATT_PARAM);
-			p.larynx = knobCv(LARYNX_PARAM, LARYNX_INPUT, LARYNX_ATT_PARAM);
-			p.ventricular = 0.0; // FALSE FOLDS control removed (subtle effect)
-			// SOURCE only acts with a cable in EXT IN: unpatched, the folds always sing
-			float source = knobCv(SOURCE_PARAM, SOURCE_INPUT, SOURCE_ATT_PARAM);
-			if (!inputs[EXT_INPUT].isConnected()) source = 0.f;
-			sourceShown = source;
-			chim_set_ext(voice, source);
 			// Phona Lab next to this module: its knobs are the tunable values. The ones that shape
-			// a syllable's plan go to the worker, the others to the voice.
-			Module* lab = nullptr;
-			if (rightExpander.module && rightExpander.module->model == modelPhonaLab) lab = rightExpander.module;
-			else if (leftExpander.module && leftExpander.module->model == modelPhonaLab) lab = leftExpander.module;
+			// a syllable's plan go to the worker, the others to the voices.
+			// (directly, or with other Phona expanders between them)
+			Module* lab = familyNear(this, modelPhonaLab);
 			bool replan = false;
 			for (int i = 0; i < CHIM_TUNE_N; i++) {
 				double x = lab ? (double) lab->params[i].getValue() : PhonaLab::spec(i).def;
@@ -530,36 +646,75 @@ struct Phona : Module {
 				if (PhonaLab::spec(i).plan) replan = true;
 			}
 			if (replan) tuneVersion++;
-			chim_set_tune(voice, tuneCur);
-			chim_set(voice, &p);
-			// a dead voice stays silent: show the fault and ask the worker for a new voice (once)
-			dead = chim_is_dead(voice) != 0;
-			if (dead && !faultReported) {
+			float semis = params[PITCH_PARAM].getValue() + params[FINE_PARAM].getValue();
+			modShown[PITCH_PARAM] = params[PITCH_PARAM].getValue() + 12.f * inputs[VOCT_INPUT].getVoltage(); // the arc clamps it
+			bool extPatched = inputs[EXT_INPUT].isConnected();
+			bool anyDead = false;
+			for (int c = 0; c < nv; c++) {
+				ChimParams p;
+				p.f0 = dsp::FREQ_C4 * std::pow(2.f, semis / 12.f + inputs[VOCT_INPUT].getPolyVoltage(c));
+				p.vowel = knobCv(VOWEL_PARAM, VOWEL_INPUT, VOWEL_ATT_PARAM, c);
+				p.pressure = 8.0 * knobCv(EFFORT_PARAM, EFFORT_INPUT, EFFORT_ATT_PARAM, c); // Rust side clamps and compensates
+				p.breathiness = knobCv(BREATHY_PARAM, BREATHY_INPUT, BREATHY_ATT_PARAM, c);
+				p.tension = knobCv(TENSION_PARAM, TENSION_INPUT, TENSION_ATT_PARAM, c);
+				p.brightness = knobCv(BRIGHT_PARAM, BRIGHT_INPUT, BRIGHT_ATT_PARAM, c);
+				p.roughness = knobCv(ROUGH_PARAM, ROUGH_INPUT, ROUGH_ATT_PARAM, c);
+				p.vib_depth = knobCv(VIBDEPTH_PARAM, VIBDEPTH_INPUT, VIBDEPTH_ATT_PARAM, c);
+				p.vib_rate = knobCv(VIBRATE_PARAM, VIBRATE_INPUT, VIBRATE_ATT_PARAM, c);
+				p.gate = gates[c];
+				p.glide = 0.002 * std::pow(500.f, knobCv(GLIDE_PARAM, GLIDE_INPUT, GLIDE_ATT_PARAM, c));
+				p.fry = knobCv(FRY_PARAM, FRY_INPUT, FRY_ATT_PARAM, c);
+				p.velum = -0.25 + 1.65 * knobCv(NASAL_PARAM, NASAL_INPUT, NASAL_ATT_PARAM, c);
+				p.larynx = knobCv(LARYNX_PARAM, LARYNX_INPUT, LARYNX_ATT_PARAM, c);
+				p.ventricular = 0.0; // FALSE FOLDS control removed (subtle effect)
+				// SOURCE only acts with a cable in EXT IN: unpatched, the folds always sing
+				float source = knobCv(SOURCE_PARAM, SOURCE_INPUT, SOURCE_ATT_PARAM, c);
+				if (!extPatched) source = 0.f;
+				if (c == 0) sourceShown = source;
+				chim_set_ext(voice[c], source);
+				chim_set_tune(voice[c], tuneCur);
+				chim_set(voice[c], &p);
+				lanes[c].dead = chim_is_dead(voice[c]) != 0;
+				anyDead = anyDead || lanes[c].dead;
+			}
+			// a dead voice stays silent: show the fault and ask the worker for new voices (once)
+			if (anyDead && !faultReported) {
 				faultReported = true;
 				rebuildRequest = true;
 			}
 		}
 
-		// skip rendering once the gate is closed and the voice has decayed to silence
-		if (gate > 0.f || wantBeat) {
-			idle = false;
-			silentFor = 0.f;
-		}
-		float out = 0.f;
-		if (!idle) {
-			float ext = inputs[EXT_INPUT].getVoltage() / 5.f;
-			chim_render_ext(voice, &ext, &out, 1);
-			if (gate <= 0.f && std::fabs(out) < 1e-5f) {
-				silentFor += args.sampleTime;
-				if (silentFor > 1.f && !wantBeat) idle = true;
+		// skip rendering a voice once its gate is closed and it has decayed to silence
+		outputs[AUDIO_OUTPUT].setChannels(wantBeat ? 1 : nOut);
+		bool anySounding = false, anyDead = false;
+		for (int c = 0; c < nv; c++) {
+			Lane& L = lanes[c];
+			bool beatVoice = wantBeat && c == 0;
+			if (gates[c] > 0.f || beatVoice) {
+				L.idle = false;
+				L.silentFor = 0.f;
 			}
-			else if (gate <= 0.f) {
-				silentFor = 0.f;
+			float out = 0.f;
+			if (!L.idle) {
+				float ext = inputs[EXT_INPUT].getPolyVoltage(c) / 5.f;
+				chim_render_ext(voice[c], &ext, &out, 1);
+				if (gates[c] <= 0.f && std::fabs(out) < 1e-5f) {
+					L.silentFor += args.sampleTime;
+					if (L.silentFor > 1.f && !beatVoice) L.idle = true;
+				}
+				else if (gates[c] <= 0.f) {
+					L.silentFor = 0.f;
+				}
 			}
+			if (c < (wantBeat ? 1 : nOut)) outputs[AUDIO_OUTPUT].setVoltage(6.25f * out, c);
+			if (tapsOn) tapRing[c][tapPos & (TAP_N - 1)] = 6.25f * out;
+			anySounding = anySounding || !L.idle;
+			anyDead = anyDead || L.dead;
 		}
-		outputs[AUDIO_OUTPUT].setVoltage(6.25f * out);
-		bool fault = dead || buildFailed;
-		lights[STATUS_LIGHT + 0].setBrightnessSmooth(idle || fault ? 0.f : 1.f, args.sampleTime);
+		tapPos++;
+		captureTaps(args.sampleRate, nOut, wantLyr, wantBeat);
+		bool fault = anyDead || buildFailed;
+		lights[STATUS_LIGHT + 0].setBrightnessSmooth(!anySounding || fault ? 0.f : 1.f, args.sampleTime);
 		lights[STATUS_LIGHT + 1].setBrightnessSmooth(fault ? 1.f : 0.f, args.sampleTime);
 	}
 };
@@ -894,6 +1049,11 @@ struct LyricsField : ui::TextField {
 void PhonaWidget::appendContextMenu(Menu* menu) {
 	Phona* module = getModule<Phona>();
 	if (!module) return;
+	menu->addChild(new MenuSeparator);
+	menu->addChild(createIndexSubmenuItem("Polyphony (max voices)", {"1", "2", "3", "4"},
+		[=]() { return (size_t) (module->polyMax.load() - 1); },
+		[=](size_t i) { module->setPolyMax((int) i + 1); }));
+	menu->addChild(createMenuLabel("Voices = V/OCT or GATE channels, up to the max; beatbox is mono"));
 	menu->addChild(new MenuSeparator);
 	menu->addChild(createCheckMenuItem("Lyrics mode", "", [=]() { return !module->beatMode.load(); }, [=]() { module->setBeatMode(false); }));
 	menu->addChild(createCheckMenuItem("Beatbox mode", "", [=]() { return module->beatMode.load(); }, [=]() { module->setBeatMode(true); }));

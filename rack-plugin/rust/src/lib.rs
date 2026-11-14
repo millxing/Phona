@@ -5,7 +5,9 @@
 //! - `chim_set` / `chim_render` are allocation-free: call them on the audio thread.
 //! Panics never unwind into C++: they are caught, the voice is marked dead and renders silence.
 use chimera::anatomy::human::{ArticKey, ArticPatch, BodyMix, NEUTRAL};
-use chimera::voice::human_airway::HumanAirway;
+use chimera::voice::human_airway::{HumanAirway, NoiseBands, NoiseGains};
+use chimera::control::beat_player::BeatPlayer;
+use chimera::phonetics::beatbox::MAX_SOUND_GESTURES;
 use chimera::engine::Engine;
 use chimera::phonetics::beatbox::{beat_ready, BeatStep};
 use chimera::voice::human_voice::DEFAULT_SOURCE;
@@ -56,6 +58,14 @@ pub struct ChimVoice {
     /// Lyrics mode (see `chim_set_lyrics`): the syllable being sung, with its plan.
     beat_on: bool,
     beat_muted: bool,
+    /// what each beat sound changes at its hit (B, Pf, t), see `BeatFit`
+    beat_fit: [BeatFit; 3],
+    /// the mouths that make the beat sounds (see `BeatVoice`)
+    beat_voices: Vec<BeatVoice>,
+    /// the engine's own noise gains and bands (a hit changes them, the other modes put them back)
+    noise_base_all: NoiseGains,
+    band_base: NoiseBands,
+    viscous_base: f64,
     lyr_on: bool,
     lyr: *const ChimLyrics,
     lyr_held: Option<usize>,
@@ -82,7 +92,82 @@ pub struct ChimVoice {
     lyr_level: f64,
     dbg_neutral: bool,
     dead: bool,
+    /// telemetry buffers for `vis::chim_vis_capture` (filled once in `chim_new`, then reused)
+    vis_tele: chimera::voice::human_voice::VoiceTelemetry,
 }
+
+/// One change to a gesture of a beat sound.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum BeatEdit {
+    /// move the gesture (ms)
+    Shift,
+    /// x length, x ramps, x strength
+    Dur,
+    RampIn,
+    RampOut,
+    Strength,
+    /// articulator speed
+    Speed,
+    /// target value of this control
+    Target(ControlKey),
+}
+
+/// What a beat sound changes in the voice at its hit. The engine's own sounds were far from a
+/// human beatboxer's (the hat was mostly a low air pulse with 8 % of its energy above 5 kHz; a
+/// human hat has 70 % there), and its gestures alone could not close the gap: the noise sources
+/// are too weak and too dull. These values come from a search against human reference hits
+/// (audition/beat-fit-01).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BeatFit {
+    /// x the engine's noise gains: glottis, constriction, teeth
+    noise: [f64; 3],
+    /// noise bands (lowpass Hz, highpass Hz): glottis, constriction, teeth
+    bands: [(f64, f64); 3],
+    /// lung pressure (engine units)
+    pressure: f64,
+    /// added to the ready posture: jaw, lip opening, tongue height
+    posture: [f64; 3],
+    /// output high-pass (Hz; 0 = off): takes out the air pulse under the sound
+    hp: f64,
+    /// output level
+    gain: f64,
+    /// Output tone, as a close microphone gives a recorded beatboxer (the engine's own app has
+    /// one too): low shelf (Hz, dB), peak (Hz, dB, Q), low-pass (Hz; 0 = off).
+    shelf: (f64, f64),
+    peak: (f64, f64, f64),
+    lp: f64,
+    /// x the airway's viscous loss (more = the mouth rings less after a burst)
+    viscous: f64,
+    /// (gesture index in the sound's build order, what, value)
+    edits: &'static [(usize, BeatEdit, f64)],
+    /// gestures added to the sound, on the time axis of its own gestures
+    extra: &'static [BeatExtra],
+    /// How far a waiting mouth prepares the sound (s from the start of its gestures): it stops
+    /// there, just before the sound is heard, and a hit lets it go on. 0 = it waits at the
+    /// start, and the hit sounds a whole lead-in later.
+    hold: f64,
+    /// when the sound is over (s from the start of its gestures); then the mouth prepares again
+    tail: f64,
+}
+
+/// A gesture added to a beat sound: one control to a value. Times in ms.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BeatExtra {
+    t0: f64,
+    dur: f64,
+    ramp_in: f64,
+    ramp_out: f64,
+    strength: f64,
+    key: ControlKey,
+    value: f64,
+}
+
+/// The engine's own sound, unchanged.
+pub(crate) const BEAT_PLAIN: BeatFit = BeatFit { noise: [1.0; 3], bands: [(3500.0, 300.0), (2600.0, 350.0), (5000.0, 1200.0)], pressure: 8.0, posture: [0.0; 3], hp: 0.0, gain: 1.0, shelf: (120.0, 0.0), peak: (1000.0, 0.0, 1.0), lp: 0.0, viscous: 1.0, edits: &[], extra: &[], hold: 0.0, tail: 0.6 };
+
+/// B, Pf, t (the tokens 1, 2, 3 of `chim_beat_hit`).
+pub(crate) const BEAT_IDS: [&str; 3] = ["B", "Pf", "t"];
+include!("beat_fit_table.rs");
 
 /// Number of tunable values (Phona Lab). The order is the order of the Lab module's params.
 pub const TUNE_N: usize = 18;
@@ -461,7 +546,18 @@ pub extern "C" fn chim_set_beatbox(v: *mut ChimVoice, on: i32) {
             v.engine.set_artic(&beat_ready(v.engine.info().body), Some(true));
         }
         v.engine.voice_mut().glottis.fry_pull = None;
-        v.engine.voice_mut().airway.noise_gain.glottis = v.noise_base;
+        v.engine.voice_mut().airway.noise_gain = v.noise_base_all;
+        v.engine.voice_mut().airway.noise_band = v.band_base;
+        v.engine.voice_mut().airway.net.viscous_scale = v.viscous_base;
+        let (fits, on, fs) = (v.beat_fit, v.beat_on, v.fs);
+        for b in v.beat_voices.iter_mut() {
+            b.engine.stop_speech();
+            b.queued = false;
+            b.state = BeatState::Off;
+            if on {
+                b.arm(&fits[b.sound], fs);
+            }
+        }
         v.engine.voice_mut().ext_in = 0.0;
         v.ext_gate = 0.0;
         v.ext_gate_target = 0.0;
@@ -473,20 +569,278 @@ pub extern "C" fn chim_set_beatbox(v: *mut ChimVoice, on: i32) {
     })).is_err() { v.dead = true; }
 }
 
-/// Monophonic replacement: 1=B, 2=Pf, 3=t. Zero/invalid cancels and mutes.
-/// The engine supplies all breath and duration, independent of gate width.
+/// Biquad coefficients b0, b1, b2, a1, a2 (Audio EQ Cookbook): 0 = low shelf, 1 = peak, 2 = low-pass.
+fn biquad(kind: i32, hz: f64, db: f64, q: f64, fs: f64) -> [f32; 5] {
+    let (sn, cs) = (std::f64::consts::TAU * hz / fs).sin_cos();
+    let a = 10f64.powf(db / 40.0);
+    let alpha = sn / (2.0 * q.max(0.1));
+    let (b0, b1, b2, a0, a1, a2) = match kind {
+        0 => {
+            let k = 2.0 * a.sqrt() * alpha;
+            (a * ((a + 1.0) - (a - 1.0) * cs + k), 2.0 * a * ((a - 1.0) - (a + 1.0) * cs), a * ((a + 1.0) - (a - 1.0) * cs - k),
+                (a + 1.0) + (a - 1.0) * cs + k, -2.0 * ((a - 1.0) + (a + 1.0) * cs), (a + 1.0) + (a - 1.0) * cs - k)
+        }
+        1 => (1.0 + alpha * a, -2.0 * cs, 1.0 - alpha * a, 1.0 + alpha / a, -2.0 * cs, 1.0 - alpha / a),
+        _ => ((1.0 - cs) / 2.0, 1.0 - cs, (1.0 - cs) / 2.0, 1.0 + alpha, -2.0 * cs, 1.0 - alpha),
+    };
+    [(b0 / a0) as f32, (b1 / a0) as f32, (b2 / a0) as f32, (a1 / a0) as f32, (a2 / a0) as f32]
+}
+
+/// The mouths of beat mode, by sound (index into `BEAT_IDS`): two for the kick, two for the
+/// snare, three for the hat.
+const BEAT_VOICES: [usize; 7] = [0, 0, 1, 1, 2, 2, 2];
+/// A new mouth holds its posture this long before it is used (s), off the audio thread.
+const BEAT_SETTLE: f64 = 0.3;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum BeatState {
+    /// not in beat mode
+    Off,
+    /// preparing the sound: the gestures run up to `hold_at`
+    Arming,
+    /// prepared and stopped: the model does not run, and costs nothing
+    Armed,
+    /// let go by a hit: runs until the sound is over
+    Firing,
+}
+
+/// One mouth for one beat sound. A sound takes 80 to 170 ms from the start of its gestures to
+/// the burst (the mouth has to close and build pressure), which a played instrument cannot have
+/// as latency, and a single mouth that starts the next sound cuts the one before. So each
+/// sound has its own mouths: one prepares the sound ahead and stops just before the burst, as
+/// a beatboxer does before the beat; a hit lets it go on, and another one takes the next hit
+/// while this one finishes and prepares again. The sound itself is synthesized at the hit.
+struct BeatVoice {
+    engine: Engine,
+    sound: usize,
+    state: BeatState,
+    /// a hit came before the sound was prepared: it sounds as soon as it is
+    queued: bool,
+    /// voice-clock times: where the preparation stops, and where the sound is over
+    hold_at: f64,
+    end_at: f64,
+    scratch: Vec<Gesture>,
+    noise_base: NoiseGains,
+    viscous_base: f64,
+    /// output: high-pass, tone filters (coefficients b0 b1 b2 a1 a2, states), level
+    hp: [f32; 5],
+    hp_z: [f32; 2],
+    hp_on: bool,
+    eq: [[f32; 5]; 3],
+    eq_z: [[f32; 2]; 3],
+    eq_n: usize,
+    gain: f32,
+    /// 0 while the sound is prepared (the mouth closing makes small noises of its own, 30 to
+    /// 50 dB under the sound), 1 after a hit, with a 1 ms fade between
+    open: f32,
+}
+
+impl BeatVoice {
+    /// Allocates and runs the model for `BEAT_SETTLE` seconds: off the audio thread.
+    fn new(fs: f64, body: BodyMix, sound: usize, fit: &BeatFit) -> BeatVoice {
+        let mut engine = Engine::new(fs);
+        engine.set_body(body);
+        engine.voice_mut().airway.tract.velum_junction = true;
+        engine.voice_mut().artic.settle = true;
+        engine.voice_mut().limiter = false;
+        engine.voice_mut().fold_scale = 0.0;
+        engine.set_gate(0.0);
+        let noise_base = engine.voice().airway.noise_gain;
+        let visc = engine.voice().airway.net.viscous_scale;
+        let mut b = BeatVoice { engine, sound, state: BeatState::Off, queued: false, hold_at: 0.0, end_at: 0.0, scratch: Vec::with_capacity(MAX_SOUND_GESTURES), noise_base, viscous_base: visc,
+            hp: [1.0, 0.0, 0.0, 0.0, 0.0], hp_z: [0.0; 2], hp_on: false, eq: [[0.0; 5]; 3], eq_z: [[0.0; 2]; 3], eq_n: 0, gain: 1.0, open: 0.0 };
+        b.settle(fit, fs);
+        b
+    }
+
+    /// Takes the sound's settings and holds its ready posture until the mouth is at rest.
+    /// Runs the model: off the audio thread.
+    fn settle(&mut self, fit: &BeatFit, fs: f64) {
+        self.engine.stop_speech();
+        self.apply(fit, fs);
+        let mut buf = [0f32; 64];
+        for _ in 0..(BEAT_SETTLE * fs / 64.0) as usize {
+            self.engine.render(&mut buf);
+        }
+        self.state = BeatState::Off;
+        self.queued = false;
+    }
+
+    /// The sound's settings of the voice and of the output. Real-time safe.
+    fn apply(&mut self, fit: &BeatFit, fs: f64) {
+        let body = self.engine.info().body;
+        self.engine.set_source(&SourcePatch { pressure: Some(fit.pressure), ..SourcePatch::from_source(&DEFAULT_SOURCE) });
+        self.engine.voice_mut().glottis.fry_pull = None;
+        let (g, b) = (self.noise_base, fit.bands);
+        let airway = &mut self.engine.voice_mut().airway;
+        airway.noise_gain = NoiseGains { glottis: g.glottis * fit.noise[0], constriction: g.constriction * fit.noise[1], teeth: g.teeth * fit.noise[2] };
+        airway.noise_band = NoiseBands { glottis: b[0], constriction: b[1], teeth: b[2] };
+        airway.net.viscous_scale = self.viscous_base * fit.viscous;
+        let mut ready = beat_ready(body);
+        for (key, d) in [ArticKey::Jaw, ArticKey::LipAp, ArticKey::TbY].into_iter().zip(fit.posture) {
+            let x = ready.get(key).unwrap_or(0.0) + d;
+            ready.set(key, x);
+        }
+        self.engine.set_artic(&ready, Some(true));
+        let nyq = 0.45 * fs;
+        self.hp_on = fit.hp > 0.0;
+        if self.hp_on {
+            let w = std::f64::consts::TAU * fit.hp.clamp(10.0, nyq) / fs;
+            let (sn, cs) = w.sin_cos();
+            let alpha = sn / std::f64::consts::SQRT_2; // Q = 0.707
+            let a0 = 1.0 + alpha;
+            self.hp = [((1.0 + cs) / 2.0 / a0) as f32, (-(1.0 + cs) / a0) as f32, ((1.0 + cs) / 2.0 / a0) as f32, (-2.0 * cs / a0) as f32, ((1.0 - alpha) / a0) as f32];
+        }
+        self.eq_n = 0;
+        for (on, kind, hz, db, q) in [
+            (fit.shelf.1 != 0.0, 0, fit.shelf.0, fit.shelf.1, 0.707),
+            (fit.peak.1 != 0.0, 1, fit.peak.0, fit.peak.1, fit.peak.2),
+            (fit.lp > 0.0 && fit.lp < nyq, 2, fit.lp, 0.0, 0.707),
+        ] {
+            if on {
+                self.eq[self.eq_n] = biquad(kind, hz.clamp(10.0, nyq), db, q, fs);
+                self.eq_n += 1;
+            }
+        }
+        self.gain = fit.gain as f32;
+    }
+
+    /// Start to prepare the sound: its gestures go on the score. Real-time safe.
+    fn arm(&mut self, fit: &BeatFit, fs: f64) {
+        self.apply(fit, fs);
+        let (id, body) = (BEAT_IDS[self.sound], self.engine.info().body);
+        // the lead-in is the unchanged sound's, so an edit that moves a gesture moves the sound
+        let lead = BeatPlayer::lead_in_with(id, body, &mut self.scratch);
+        self.scratch.clear();
+        self.engine.beat().gestures(&BeatStep::new(id), 0.0, 0.18, &mut self.scratch);
+        for (i, what, x) in fit.edits {
+            let Some(g) = self.scratch.get_mut(*i) else { continue };
+            match what {
+                BeatEdit::Shift => { g.t0 += x * 1e-3; g.t1 += x * 1e-3; }
+                BeatEdit::Dur => g.t1 = g.t0 + (g.t1 - g.t0) * x,
+                BeatEdit::RampIn => g.ramp_in *= x,
+                BeatEdit::RampOut => g.ramp_out *= x,
+                BeatEdit::Strength => g.strength *= x,
+                BeatEdit::Speed => g.speed = Some(*x),
+                BeatEdit::Target(key) => { g.targets.set(*key, *x); }
+            }
+        }
+        for x in fit.extra {
+            if self.scratch.len() < self.scratch.capacity() {
+                let mut t = Targets::default();
+                t.set(x.key, x.value);
+                self.scratch.push(Gesture::new(x.t0 * 1e-3, (x.t0 + x.dur) * 1e-3, x.ramp_in * 1e-3, x.ramp_out * 1e-3, x.strength, t));
+            }
+        }
+        let now = self.engine.clock();
+        self.engine.schedule(&self.scratch, lead, false);
+        let hold = fit.hold.clamp(0.0, 1.0);
+        self.hold_at = now + hold;
+        self.end_at = now + fit.tail.clamp(hold + 0.02, 2.0);
+        self.state = BeatState::Arming;
+        self.open = 0.0;
+    }
+
+    /// A hit: the prepared sound goes on, or sounds as soon as it is prepared.
+    fn fire(&mut self) {
+        if self.state == BeatState::Armed {
+            self.state = BeatState::Firing;
+        } else {
+            self.queued = true;
+        }
+    }
+
+    /// How long until this mouth can answer a hit (s); `None` when it already owes one.
+    fn wait(&self, fit: &BeatFit) -> Option<f64> {
+        let now = self.engine.clock();
+        match self.state {
+            _ if self.queued => None,
+            BeatState::Off => None,
+            BeatState::Armed => Some(0.0),
+            BeatState::Arming => Some((self.hold_at - now).max(0.0)),
+            BeatState::Firing => Some((self.end_at - now).max(0.0) + fit.hold.clamp(0.0, 1.0)),
+        }
+    }
+
+    /// Adds this mouth's sound to `out`. Real-time safe.
+    fn render_add(&mut self, out: &mut [f32], fit: &BeatFit, fs: f64) {
+        let mut pos = 0;
+        let mut guard = 0;
+        while pos < out.len() && guard < 8 {
+            let until = match self.state {
+                BeatState::Off | BeatState::Armed => return,
+                BeatState::Arming => self.hold_at,
+                BeatState::Firing => self.end_at,
+            };
+            let left = ((until - self.engine.clock()) * fs).ceil();
+            if left < 1.0 {
+                guard += 1;
+                if self.state == BeatState::Arming {
+                    self.state = BeatState::Armed;
+                } else {
+                    self.arm(fit, fs);
+                }
+                if self.queued && self.state == BeatState::Armed {
+                    self.queued = false;
+                    self.state = BeatState::Firing;
+                }
+                continue;
+            }
+            let mut buf = [0f32; 64];
+            let n = (left as usize).min(out.len() - pos).min(64);
+            let buf = &mut buf[..n];
+            self.engine.render(buf);
+            if self.hp_on {
+                let [b0, b1, b2, a1, a2] = self.hp;
+                for s in buf.iter_mut() {
+                    let x = *s;
+                    let y = b0 * x + self.hp_z[0];
+                    self.hp_z[0] = b1 * x - a1 * y + self.hp_z[1];
+                    self.hp_z[1] = b2 * x - a2 * y;
+                    *s = y;
+                }
+            }
+            for (c, z) in self.eq[..self.eq_n].iter().zip(self.eq_z.iter_mut()) {
+                let [b0, b1, b2, a1, a2] = *c;
+                for s in buf.iter_mut() {
+                    let x = *s;
+                    let y = b0 * x + z[0];
+                    z[0] = b1 * x - a1 * y + z[1];
+                    z[1] = b2 * x - a2 * y;
+                    *s = y;
+                }
+            }
+            if self.state == BeatState::Firing {
+                let step = (1.0 / (0.001 * fs)) as f32;
+                for (o, s) in out[pos..pos + n].iter_mut().zip(buf.iter()) {
+                    self.open = (self.open + step).min(1.0);
+                    *o += *s * self.gain * self.open;
+                }
+            }
+            pos += n;
+        }
+    }
+}
+
+/// A hit: 1=B, 2=Pf, 3=t. Zero/invalid is a rest: nothing starts, and the sounds in progress
+/// finish. The engine supplies all breath and duration, independent of gate width.
 #[no_mangle]
 pub extern "C" fn chim_beat_hit(v: *mut ChimVoice, token: i32) {
     let Some(v) = (unsafe { v.as_mut() }) else { return };
     if v.dead || !v.beat_on { return; }
-    if catch_unwind(AssertUnwindSafe(|| {
-        v.engine.stop_speech();
-        v.engine.set_gate(0.0);
-        v.beat_muted = true;
-        let id = match token { 1 => "B", 2 => "Pf", 3 => "t", _ => return };
-        v.engine.beat_hit(&BeatStep::new(id));
-        v.beat_muted = false;
-    })).is_err() { v.dead = true; }
+    let k = match token { 1..=3 => token as usize - 1, _ => return };
+    // the mouth of this sound that can answer first
+    let fit = v.beat_fit[k];
+    let mut best: Option<(usize, f64)> = None;
+    for (i, b) in v.beat_voices.iter().enumerate() {
+        if b.sound != k { continue; }
+        if let Some(w) = b.wait(&fit) {
+            if best.is_none_or(|(_, bw)| w < bw) { best = Some((i, w)); }
+        }
+    }
+    if let Some((i, _)) = best {
+        v.beat_voices[i].fire();
+    }
 }
 
 /// The tunable values (`TUNE_N` doubles, null = defaults). The ones that shape a syllable's plan
@@ -828,7 +1182,13 @@ pub extern "C" fn chim_new(sample_rate: f64, female: f64, child: f64) -> *mut Ch
         let mut warm = [0f32; 256];
         engine.render(&mut warm);
         let noise_base = engine.voice().airway.noise_gain.glottis;
-        Box::into_raw(Box::new(ChimVoice { engine, vowels, velum_max, noise_base, female, fs, leveling: true, gain_target: 1.0, gain_coef: 1.0, gain: 1.0, ext_mix: 0.0, ext_lp: 0.0, ext_gate_target: 0.0, ext_gate: 0.0, beat_on: false, beat_muted: true, lyr_on: false, lyr: std::ptr::null(), lyr_held: None, lyr_pending_off: false, lyr_vowel_ready: 0.0, lyr_tail_end: 0.0, lyr_start: 0.0, lyr_dip: (0.0, 0.0), lyr_mute_at: f64::INFINITY, lyr_unmute_at: f64::INFINITY, lyr_fade: 1.0, hp: [1.0, 0.0, 0.0, 0.0, 0.0], hp_z: [0.0; 2], hp_on: false, tune: TUNE_DEFAULT, lyr_level: 1.0, dbg_neutral: false, dead: false }))
+        let (noise_base_all, band_base) = (engine.voice().airway.noise_gain, engine.voice().airway.noise_band);
+        let beat_voices: Vec<BeatVoice> = BEAT_VOICES.iter().map(|k| BeatVoice::new(fs, body, *k, &BEAT_FIT[*k])).collect();
+        let viscous_base = engine.voice().airway.net.viscous_scale;
+        // the View's telemetry: the first fill sizes its buffers (allocates), later ones reuse them
+        let mut vis_tele = chimera::voice::human_voice::VoiceTelemetry::default();
+        engine.voice_mut().telemetry(&mut vis_tele);
+        Box::into_raw(Box::new(ChimVoice { engine, vowels, velum_max, noise_base, female, fs, leveling: true, gain_target: 1.0, gain_coef: 1.0, gain: 1.0, ext_mix: 0.0, ext_lp: 0.0, ext_gate_target: 0.0, ext_gate: 0.0, beat_on: false, beat_muted: true, beat_fit: BEAT_FIT, beat_voices, noise_base_all, band_base, viscous_base, lyr_on: false, lyr: std::ptr::null(), lyr_held: None, lyr_pending_off: false, lyr_vowel_ready: 0.0, lyr_tail_end: 0.0, lyr_start: 0.0, lyr_dip: (0.0, 0.0), lyr_mute_at: f64::INFINITY, lyr_unmute_at: f64::INFINITY, lyr_fade: 1.0, hp: [1.0, 0.0, 0.0, 0.0, 0.0], hp_z: [0.0; 2], hp_on: false, tune: TUNE_DEFAULT, lyr_level: 1.0, dbg_neutral: false, dead: false, vis_tele }))
     });
     r.unwrap_or(std::ptr::null_mut())
 }
@@ -997,6 +1357,26 @@ pub extern "C" fn chim_render(v: *mut ChimVoice, out: *mut f32, n: usize) {
         return;
     }
     let v = unsafe { &mut *v };
+    if !v.dead && v.beat_on {
+        // Beat mode: the sum of the beat mouths. The main voice runs only when a test has
+        // unmuted it (the diagnostics of the engine's own sounds, beat_compare and sensitivity).
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            if v.beat_muted { buf.fill(0.0); } else { v.engine.render(buf); }
+            let (fits, fs) = (v.beat_fit, v.fs);
+            for b in v.beat_voices.iter_mut() {
+                b.render_add(buf, &fits[b.sound], fs);
+            }
+        }));
+        if r.is_err() || buf.iter().any(|s| !s.is_finite()) {
+            v.dead = true;
+            buf.fill(0.0);
+        } else {
+            for s in buf.iter_mut() {
+                *s = soft_clip(*s);
+            }
+        }
+        return;
+    }
     if !v.dead {
         let r = catch_unwind(AssertUnwindSafe(|| v.engine.render(buf)));
         if r.is_err() {
@@ -1027,7 +1407,7 @@ pub extern "C" fn chim_render(v: *mut ChimVoice, out: *mut f32, n: usize) {
         for s in buf.iter_mut() {
             v.gain += v.gain_coef * (v.gain_target - v.gain);
             v.lyr_fade += fade_coef * (fade_to - v.lyr_fade);
-            *s = if v.beat_on && v.beat_muted { 0.0 } else { soft_clip(*s * v.gain) * v.lyr_fade };
+            *s = soft_clip(*s * v.gain) * v.lyr_fade;
         }
     }
 }
@@ -1219,23 +1599,27 @@ mod alloc_test {
                         voice.engine.voice().glottis.params.effort,
                         voice.engine.voice().artic.target.to_array());
                     assert_eq!(before, after);
-                    assert_eq!(voice.engine.voice().glottis.params.amplitude, 0.0, "no periodic fold excitation");
+                    assert!(voice.beat_voices.iter().all(|b| b.engine.voice().glottis.params.amplitude == 0.0), "no periodic fold excitation");
                     chim_render(v, out.as_mut_ptr(), 16);
                     peak = out.iter().fold(peak, |p, s| p.max(s.abs()));
                 }
                 assert!(peak > 0.001, "silent beat {token}, body {female}: {peak}");
             }
-            for i in 0..100 { // dense replacement must not accumulate a stale score
-                chim_beat_hit(v, i % 3 + 1);
-                assert!(unsafe { &*v }.engine.score().size() <= 16);
+            for i in 0..2000 { // dense hits: no mouth collects a stale score, and the output stays in range
+                if i % 20 == 0 { chim_beat_hit(v, (i / 20) % 3 + 1); }
+                assert!(unsafe { &*v }.beat_voices.iter().all(|b| b.engine.score().size() <= 32)); // at most the sound that ends and the one being prepared
                 chim_render(v, out.as_mut_ptr(), 16);
+                assert!(out.iter().all(|s| s.abs() <= 1.6));
             }
-            for token in [0, -1, 4, i32::MAX] {
+            for token in [0, -1, 4, i32::MAX] { // a rest starts nothing; the sounds in progress end
                 chim_beat_hit(v, token);
-                assert_eq!(unsafe { &*v }.engine.score().size(), 0);
-                chim_render(v, out.as_mut_ptr(), 16);
-                assert!(out.iter().all(|s| *s == 0.0));
             }
+            for _ in 0..3000 { chim_render(v, out.as_mut_ptr(), 16); }
+            assert!(out.iter().all(|s| *s == 0.0), "the mouths wait in silence");
+            // waiting mouths do not run: their clocks stand still
+            let clocks: Vec<f64> = unsafe { &*v }.beat_voices.iter().map(|b| b.engine.clock()).collect();
+            for _ in 0..100 { chim_render(v, out.as_mut_ptr(), 16); }
+            assert_eq!(clocks, unsafe { &*v }.beat_voices.iter().map(|b| b.engine.clock()).collect::<Vec<f64>>());
             chim_set_beatbox(v, 0);
             chim_set_ext(v, 0.0);
             chim_set(v, &p);
@@ -1255,9 +1639,14 @@ mod alloc_test {
             let v = chim_new(48000.0, female, 0.0);
             let mut p = ChimParams { f0: 147.0, pressure: 8.0, breathiness: 0.2, tension: 0.5, brightness: 0.3, roughness: 0.1, vib_depth: 30.0, vib_rate: 5.5, vowel: 0.0, gate: 0.0, glide: 0.06, fry: 0.0, velum: -0.15, larynx: 0.0, ventricular: 0.0 };
             let mut s = 0f32;
+            // the View's snapshot (allocated before arming; the capture itself must not allocate)
+            let mut vis: Box<vis::ChimVis> = unsafe { Box::new(std::mem::zeroed()) };
             COUNT.store(0, Ordering::Relaxed);
             ARMED.store(true, Ordering::Relaxed);
             for k in 0..96000 {
+                if k % 1200 == 0 {
+                    vis::chim_vis_capture(v, &mut *vis);
+                }
                 if k % 16 == 0 {
                     p.vowel = 4.0 * (k as f64 / 96000.0);
                     p.gate = if (k / 12000) % 2 == 0 { 1.0 } else { 0.0 };
@@ -1286,6 +1675,9 @@ mod alloc_test {
                     p.gate = if on { 1.0 } else { 0.0 };
                     chim_set(v, &p);
                 }
+                if k % 1200 == 0 {
+                    vis::chim_vis_capture(v, &mut *vis); // gesture labels in the score
+                }
                 chim_render(v, &mut s, 1);
                 peak = peak.max(s.abs());
             }
@@ -1313,3 +1705,7 @@ mod alloc_test {
 
 #[cfg(test)]
 mod beat_compare;
+#[cfg(test)]
+mod sensitivity;
+
+pub mod vis;

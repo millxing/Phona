@@ -4,6 +4,8 @@
 #include <iostream>
 Plugin* pluginInstance = nullptr;
 Model* modelPhonaLab = nullptr;
+Model* modelPhonaView = nullptr;
+Model* modelPhonaScope = nullptr;
 int main(int argc, char** argv) {
     Context context;
     context.engine = new engine::Engine;

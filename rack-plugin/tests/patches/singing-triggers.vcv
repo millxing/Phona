@@ -312,7 +312,8 @@
       ],
       "data": {
         "lyrics": "doh ray mee fah soh lah tee doh",
-        "beatbox": false
+        "beatbox": false,
+        "voices": 1
       }
     },
     {

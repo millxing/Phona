@@ -531,10 +531,34 @@ index 83ce8e5..bffa4fe 100644
          self.f0_now = f0;
  
 diff --git a/crates/chimera/src/voice/human_airway.rs b/crates/chimera/src/voice/human_airway.rs
-index 0b3fbc9..e308997 100644
+index 0b3fbc9..69cb825 100644
 --- a/crates/chimera/src/voice/human_airway.rs
 +++ b/crates/chimera/src/voice/human_airway.rs
-@@ -62,6 +62,8 @@ pub struct HumanAirway {
+@@ -16,6 +16,14 @@ pub struct NoiseGains {
+     pub teeth: f64,
+ }
+ 
++/// Band limits (Hz) of each turbulence source: (lowpass, highpass).
++#[derive(Clone, Copy, Debug)]
++pub struct NoiseBands {
++    pub glottis: (f64, f64),
++    pub constriction: (f64, f64),
++    pub teeth: (f64, f64),
++}
++
+ #[derive(Clone, Debug)]
+ pub struct HumanAirway {
+     pub net: AirwayNetwork,
+@@ -43,6 +51,8 @@ pub struct HumanAirway {
+     pub or_len: f64,
+     /// noise gains (tunable)
+     pub noise_gain: NoiseGains,
++    /// noise band limits (tunable; the defaults are the engine's own)
++    pub noise_band: NoiseBands,
+     /// max area change rate (cm²/s, body-scaled): a physiological guard against geometric jumps
+     pub max_area_rate: f64,
+     /// additional rate per cm² of current area (1/s)
+@@ -62,6 +72,8 @@ pub struct HumanAirway {
      base_dt: f64,
      noise_list: Vec<NoiseSpec>,
      scratch_frame: HumanFrame,
@@ -543,7 +567,15 @@ index 0b3fbc9..e308997 100644
  }
  
  impl HumanAirway {
-@@ -150,6 +152,7 @@ impl HumanAirway {
+@@ -140,6 +152,7 @@ impl HumanAirway {
+             ph_len: 8.8,
+             or_len: 8.3,
+             noise_gain: NoiseGains { glottis: 3.2e-6, constriction: 2.2e-6, teeth: 3.0e-6 },
++            noise_band: NoiseBands { glottis: (3500.0, 300.0), constriction: (2600.0, 350.0), teeth: (5000.0, 1200.0) },
+             max_area_rate: 45.0,
+             area_rate_gain: 40.0,
+             seal_rate: 5.0,
+@@ -150,6 +163,7 @@ impl HumanAirway {
              base_dt: 0.0,
              noise_list: Vec::with_capacity(8),
              scratch_frame: HumanFrame::with_capacity(),
@@ -551,7 +583,7 @@ index 0b3fbc9..e308997 100644
          }
      }
  
-@@ -181,8 +184,15 @@ impl HumanAirway {
+@@ -181,8 +195,15 @@ impl HumanAirway {
  
      fn commit(&mut self, a: &HumanArtic, dt: f64) -> &HumanFrame {
          // compute into the frame kept from last time (its buffers are reused)
@@ -568,6 +600,37 @@ index 0b3fbc9..e308997 100644
          let (ph_len, or_len) = self.tract.resample(a, &f, &mut self.ph_areas, &mut self.or_areas, Some(&mut self.ph_min), Some(&mut self.or_min));
          if dt > 0.0
              && let Some(base) = &self.base
+@@ -265,10 +286,11 @@ impl HumanAirway {
+     /// Register turbulence sources: glottis, narrowest supraglottal constriction, teeth obstacle.
+     fn update_noise(&mut self, f: &HumanFrame) {
+         let g = self.noise_gain;
++        let nb = self.noise_band;
+         let mut list = core::mem::take(&mut self.noise_list);
+         list.clear();
+         // aspiration: jet from the glottis hits the epilarynx/ventricular region
+-        list.push(NoiseSpec::new(self.glottis_port, self.branch_of(self.pharynx, 1), self.branch_of(self.trachea, self.trachea.n as isize - 2), g.glottis).band(3500.0, 300.0));
++        list.push(NoiseSpec::new(self.glottis_port, self.branch_of(self.pharynx, 1), self.branch_of(self.trachea, self.trachea.n as isize - 2), g.glottis).band(nb.glottis.0, nb.glottis.1));
+         // narrowest open point in pharynx+oral (global position index p over concatenated tubes)
+         let (n_ph, n_or) = (self.n_ph, self.n_or);
+         let mut min_a = f64::INFINITY;
+@@ -304,7 +326,7 @@ impl HumanAirway {
+             let fwd = to_branch((n_tot - 2).min(min_i + off));
+             let bwd = to_branch(0.max(min_i - off));
+             if src >= 0 && fwd >= 0 && bwd >= 0 {
+-                list.push(NoiseSpec::new(src as usize, fwd as usize, bwd as usize, g.constriction * w_area).band(2600.0, 350.0));
++                list.push(NoiseSpec::new(src as usize, fwd as usize, bwd as usize, g.constriction * w_area).band(nb.constriction.0, nb.constriction.1));
+                 // obstacle source: a narrow anterior jet impinging on the incisors (sibilants)
+                 let s_min = if min_i < n_ph_i { (min_i as f64 + 0.5) * dx_ph } else { self.ph_len + ((min_i - n_ph_i) as f64 + 0.5) * dx_or };
+                 let behind = (f.teeth_s - s_min) / self.body.scale;
+@@ -315,7 +337,7 @@ impl HumanAirway {
+                     let teeth_i = n_ph_i + js_min((n_or - 2) as f64, js_max(0.0, js_round((f.teeth_s - self.ph_len) / dx_or))) as isize;
+                     let tb = to_branch(teeth_i);
+                     if tb >= 0 {
+-                        list.push(NoiseSpec::new(src as usize, tb as usize, bwd as usize, g.teeth * wt).band(5000.0, 1200.0));
++                        list.push(NoiseSpec::new(src as usize, tb as usize, bwd as usize, g.teeth * wt).band(nb.teeth.0, nb.teeth.1));
+                     }
+                 }
+             }
 diff --git a/crates/chimera/src/voice/human_voice.rs b/crates/chimera/src/voice/human_voice.rs
 index 9092506..e9c3c31 100644
 --- a/crates/chimera/src/voice/human_voice.rs
