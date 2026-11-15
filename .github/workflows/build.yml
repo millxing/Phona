@@ -45,7 +45,9 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           apt-get update -q
-          apt-get install -yq --no-install-recommends git curl unzip ca-certificates build-essential jq zstd
+          apt-get install -yq --no-install-recommends git curl unzip ca-certificates build-essential jq zstd python3
+          # Libraries that libRack.so needs, for the tests
+          apt-get install -yq --no-install-recommends libgl1 libx11-6 libasound2 libjack-jackd2-0 libpulse0
           curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
@@ -85,12 +87,7 @@ jobs:
           install: >-
             make tar zstd unzip
             mingw-w64-x86_64-gcc
-            jq
-
-      # Diagnostic only: the system libraries the Rust library needs, compared with the Makefile's list
-      - name: Rust native libraries
-        working-directory: rack-plugin/rust
-        run: cargo rustc --release --lib --crate-type staticlib --target ${{ matrix.rust_target }} -- --print native-static-libs 2>&1 | grep native-static-libs || true
+            jq python
 
       - name: Build (Windows)
         if: runner.os == 'Windows'
@@ -111,3 +108,54 @@ jobs:
           name: Phona-${{ matrix.platform }}
           path: rack-plugin/dist/*.vcvplugin
           if-no-files-found: error
+
+      # ---------------------------------------------------------------- Tests (headless: no window, no audio device)
+      # A copy of VCV Rack Free gives the tests libRack (Windows) and the Fundamental plugin (both).
+      - name: Rack Free (for the tests)
+        run: |
+          mkdir -p rack
+          if [ "$RUNNER_OS" = Windows ]; then
+            curl -fsSL -o rack/RackFree.exe "https://vcvrack.com/downloads/RackFree-${RACK_SDK_VERSION}-win-x64.exe"
+            7z x -y -orack/inst rack/RackFree.exe > /dev/null
+            RUN=$(dirname "$(find rack/inst -name libRack.dll | head -1)")
+            echo "RACK_RUN=$PWD/$RUN" >> "$GITHUB_ENV"
+            echo "Files next to libRack.dll:"; ls "$RUN"
+            echo "CPU_NAME=$(powershell -NoProfile -Command '(Get-CimInstance Win32_Processor).Name')" >> "$GITHUB_ENV"
+          else
+            curl -fsSL -o rack/RackFree.zip "https://vcvrack.com/downloads/RackFree-${RACK_SDK_VERSION}-lin-x64.zip"
+            unzip -q rack/RackFree.zip -d rack/inst
+            echo "CPU_NAME=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | sed 's/^ *//')" >> "$GITHUB_ENV"
+          fi
+          echo "FUNDAMENTAL=$PWD/$(find rack/inst -name 'Fundamental-*.vcvplugin' | head -1)" >> "$GITHUB_ENV"
+          echo "RACK_PLUGINS=$PWD/rack/plugins" >> "$GITHUB_ENV"
+
+      - name: Tests (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          RUST_TARGET: ${{ matrix.rust_target }}
+        run: |
+          mkdir -p rack/plugins && zstd -dc "$FUNDAMENTAL" | tar -x -C rack/plugins
+          bash rack-plugin/tests/ci.sh
+
+      - name: Tests (Linux)
+        if: runner.os == 'Linux'
+        env:
+          RUST_TARGET: ${{ matrix.rust_target }}
+        run: |
+          mkdir -p rack/plugins && zstd -dc "$FUNDAMENTAL" | tar -x -C rack/plugins
+          bash rack-plugin/tests/ci.sh
+
+      # The engine's own tests (83, with golden outputs) on x86. Same Rust code on Windows.
+      - name: Engine tests
+        if: runner.os == 'Linux'
+        working-directory: engine
+        run: cargo test --release -p chimera
+
+      # Known problem (also on macOS): the beatbox path allocates memory on the audio thread.
+      # Shown as a warning until it is fixed; it does not fail the build.
+      - name: Known problem - beatbox allocates on the audio thread
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        working-directory: rack-plugin/rust
+        run: cargo test --release --lib alloc_test::audio_path_does_not_allocate

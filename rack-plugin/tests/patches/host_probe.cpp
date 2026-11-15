@@ -1,9 +1,9 @@
 // Offline Rack module probe. Never creates an audio device, window, or Rack user folder.
 #include <rack.hpp>
-#include <dlfcn.h>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include "dl.hpp"
 using namespace rack;
 namespace rack { namespace core { extern plugin::Model* modelNotes; } }
 int main(int argc, char** argv) {
@@ -12,9 +12,8 @@ int main(int argc, char** argv) {
   Context context; context.engine = new engine::Engine; contextSet(&context);
   auto p = new plugin::Plugin;
   p->path = argv[1];
-  auto lib = dlopen((p->path + "/plugin.dylib").c_str(), RTLD_NOW | RTLD_LOCAL);
-  if (!lib) throw std::runtime_error(dlerror());
-  auto init = reinterpret_cast<void(*)(plugin::Plugin*)>(dlsym(lib, "init"));
+  auto lib = libOpen(p->path + "/" + PLUGIN_LIB);
+  auto init = reinterpret_cast<void(*)(plugin::Plugin*)>(libSym(lib, "init"));
   if (!init) throw std::runtime_error("missing init");
   init(p);
   json_t* result = json_object();

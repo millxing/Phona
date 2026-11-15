@@ -1,6 +1,5 @@
 // Runs actual installed modules offline. No UI, audio device, or user state access.
 #include <rack.hpp>
-#include <dlfcn.h>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -8,14 +7,15 @@
 #include <thread>
 #include <chrono>
 #include <stdexcept>
+#include "dl.hpp"
 using namespace rack;
 namespace rack { namespace core { extern plugin::Model* modelNotes; } }
 void require(bool yes, const char* message) { if(!yes) throw std::runtime_error(message); }
 json_t* read(const std::string& path) { json_error_t e; auto j=json_load_file(path.c_str(),0,&e); require(j,e.text); return j; }
 plugin::Plugin* load(const std::string& dir) {
  auto p=new plugin::Plugin; p->path=dir; auto manifest=read(dir+"/plugin.json"); p->slug=json_string_value(json_object_get(manifest,"slug")); p->version=json_string_value(json_object_get(manifest,"version"));
- p->handle=dlopen((dir+"/plugin.dylib").c_str(),RTLD_NOW|RTLD_LOCAL); if(!p->handle) throw std::runtime_error(dlerror());
- auto init=reinterpret_cast<void(*)(plugin::Plugin*)>(dlsym(p->handle,"init")); require(init,"init missing"); init(p);
+ p->handle=libOpen(dir+"/"+PLUGIN_LIB);
+ auto init=reinterpret_cast<void(*)(plugin::Plugin*)>(libSym(p->handle,"init")); require(init,"init missing"); init(p);
  json_decref(manifest); plugin::plugins.push_back(p); return p;
 }
 int main(int argc,char**argv) { try {
