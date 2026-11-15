@@ -10,7 +10,7 @@ It takes about 15 minutes. You need no special knowledge, only VCV Rack 2 and he
 
 - **Windows** 10 or 11 (64-bit), or **Linux** (64-bit x86, Ubuntu 20.04 or newer, or a similar distribution).
 - **VCV Rack 2.6** or newer. Rack Free is enough.
-- The file `Phona-2.2.0-win-x64.vcvplugin` (Windows) or `Phona-2.2.0-lin-x64.vcvplugin` (Linux).
+- The file `Phona-2.3.0-win-x64.vcvplugin` (Windows) or `Phona-2.3.0-lin-x64.vcvplugin` (Linux).
   Rob gives you the link.
 
 ## Install
@@ -54,6 +54,8 @@ link light comes on, and the mouth and the displays move while Phona sings.
 - Use a sample rate of 48 kHz (Audio module or Engine menu).
 - Read the number on Phona with **1 voice** singing, then with **4 voices** singing.
 - Listen for clicks, crackles or dropouts with 4 voices.
+- Right-click on Phona > **Quality** > **Eco (less CPU)**. Read the numbers for 1 and 4 voices again.
+  Eco must use much less CPU. The sound is a little brighter; that is normal.
 
 **7. Beatbox (optional, experimental).** Right-click on Phona > **Lyrics/Beatbox** > Beatbox. Type
 `B t Pf t` in the text field. Each gate plays the next sound (kick, hat, snare, hat). These sounds are
@@ -74,8 +76,8 @@ Audio sample rate and block size:
 3. Lyrics:                yes / no
 4. Four voices:           yes / no
 5. Displays:              yes / no
-6. CPU, 1 voice:          ___ %
-   CPU, 4 voices:         ___ %
+6. CPU, 1 voice:          Full ___ %   Eco ___ %
+   CPU, 4 voices:         Full ___ %   Eco ___ %
    Clicks or dropouts:    none / some / many
 7. Beatbox (optional):    ok / problem / not tested
 
