@@ -22,7 +22,7 @@ fn main() {
     let fs: f64 = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(48000.0);
     let held = std::env::args().nth(3).as_deref() == Some("held");
     for (female, f0, name) in [(0.0, 130.8, "male C3"), (1.0, 261.6, "female C4")] {
-        let v = chim_new(fs, female, 0.0);
+        let v = chim_new_eco(fs, female, 0.0, if std::env::var("ECO").is_ok() { 1 } else { 0 }); // ECO=1: eco quality
         let n = (secs * fs) as usize;
         let (mut sum, mut hash) = (0f64, 0u64);
         let t0 = Instant::now();

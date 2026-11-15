@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
     auto ready = [&]() {
         for (int i=0;i<4000;i++) {
             tick(16);
-            if (m.active && m.active->n == m.polyMax.load() && m.active->rate == rate
+            if (m.active && m.active->n == m.polyMax.load() && m.active->rate == rate && m.active->eco == m.eco.load()
                 && m.activeLyr && m.activeLyr->version == m.lyricsVersion.load()
                 && m.activeLyr->body == m.active->body) return;
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -106,6 +106,39 @@ int main(int argc, char** argv) {
     m.dataFromJson(old); json_decref(old);
     assert(m.polyMax == 1);
     ready(); assert(m.active->n == 1);
+
+    // Quality: Eco rebuilds the voices (no oversampling, coarser grid). They sound, cost less,
+    // and the setting is saved; old patches load in full quality.
+    m.setPolyMax(3); voct.setChannels(3); gate.setChannels(3); ready();
+    auto cpu3 = [&](float* pk) {
+        setGates(3, 10.f);
+        tick((int)(rate*0.3f));
+        auto t0 = std::chrono::steady_clock::now();
+        for (int i=0;i<(int)rate;i++) {
+            tick(1);
+            for (int c=0;c<3;c++) pk[c] = std::max(pk[c], std::fabs(out.getVoltage(c)));
+        }
+        double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        setGates(3, 0.f); tick((int)(rate*0.2f));
+        return 100.0 * s;
+    };
+    float pkFull[3] = {}, pkEco[3] = {};
+    double full = cpu3(pkFull);
+    m.eco = true; ready(); assert(m.active->eco);
+    double eco = cpu3(pkEco);
+    std::cout << "3 voices: full " << full << "% eco " << eco << "% of one core\n";
+    for (int c=0;c<3;c++) { std::cout << "eco voice " << c+1 << " peak " << pkEco[c] << " V (full " << pkFull[c] << ")\n"; assert(pkEco[c] > 0.1f); }
+    // above 60 kHz the engine already runs at 1x: eco is the same voice
+    if (rate < 60000.f) assert(eco < 0.8 * full);
+    else for (int c=0;c<3;c++) assert(pkEco[c] == pkFull[c]);
+    json_t* withEco = m.dataToJson();
+    assert(json_is_true(json_object_get(withEco, "eco")));
+    m.eco = false; m.dataFromJson(withEco); json_decref(withEco);
+    assert(m.eco.load());
+    json_t* old2 = json_object();
+    m.dataFromJson(old2); json_decref(old2);
+    assert(!m.eco.load());
+    ready(); assert(!m.active->eco);
     std::cout << "poly module test passed\n";
     return 0;
 }

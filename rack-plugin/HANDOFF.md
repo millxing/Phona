@@ -176,6 +176,34 @@ then about 25 ms of hiss near 6 kHz. Wider fold opening (abduction 0.4 to 1.0) c
 voicing. `soften_release` sets the breath target of the note-off plan to `CODA_STOP_BREATH` (0.5) for
 syllables that end in p, t, k, tʃ. Not confirmed by ear that the hiss is the blip the user means.
 
+### Eco quality (2026-11-15, released in 2.3.0; the user listened and approved it)
+
+Why: a forum user measured ~20% CPU per voice on Linux (Ryzen 5 7430U) against ~5% for Pink Trombone.
+Menu "Quality: Full / Eco (less CPU)", saved as `eco` (old patches load Full). Changing it rebuilds the voices on
+the worker like the Polyphony menu (`Built::eco`, checked when the audio thread claims a build).
+
+Cause found: below 60 kHz the engine runs 2x oversampled (96 kHz internal) and the tract grid is sized from the
+internal rate (Courant 0.93), so the cost grows with the square of the rate. 1x was unstable not because of the
+physics but because `HumanAirway::new` forces at least 8 pharynx/oral sections: at 48 kHz a female pharynx then has
+sections shorter than c·T (Courant 1.22; male 1.09), and the piriform fossa's fixed 3 sections over 2 cm do the same.
+Switching off the volume source, energy limits or viscosity did not help (measured).
+
+Fix (engine fork, default unchanged: 83 engine tests incl. golden audio pass without re-bless):
+`HumanAirway::new_with(fs, body, min_sections)`, `HumanVoice::new_with(.., oversample, min_sections)`,
+`Engine::new_with(fs, eco)`, `ECO_MIN_SECTIONS = 3`; the fossa gets fewer sections only in eco. Wrapper:
+`chim_new_eco(fs, female, child, eco)` (also passes eco to `velum_table`); `chim_new` = full. At 48 kHz eco has
+9/9 (male) and 7/8 (female) pharynx/oral sections against 18/18 and 15/16. Above 60 kHz eco = full (already 1x).
+
+Measured: bench (`ECO=1 cargo run --release --example bench`) 48 kHz, moving vowel 9.0% -> 4.5%, held 6.5% -> 2.3%
+of one M4 Max core; `tests/poly.sh` 3 voices 21.1% -> 7.4% (48 kHz), 19.6% -> 6.9% (44.1 kHz). Sound
+(`examples/ecoband.rs`, third-octave Welch spectra, eco minus full): below 1 kHz within ±1 dB for i/a/u and both
+bodies; [u] F2 a little higher (-3..-7 dB at 1 kHz, +5..+9 at 1.26 kHz); 2-8 kHz brighter by +2..+8 dB (one band
++17); 10 kHz -4..-8 dB. Glottal area and flow are the same in both (vis capture). A harmonic-by-harmonic
+comparison gave much larger numbers, but pitch drift smears it: do not use it. Test `eco_is_stable_at_the_extremes`
+(lib.rs; all control extremes, both bodies, 44.1/48/96 kHz; tract pressure bound) fails with the old minimum of 8
+(pressure 7.5e83), passes with 3. Not tested: lyrics consonants and beatbox in eco by ear (beat voices stay full).
+Ideas not done: a high shelf in eco to match full's top end; eco at 88.2/96 kHz with a coarser grid.
+
 ### Phona View and Phona Scope: display expanders (2026-11-13, released in 2.2.0)
 
 Two expanders with no audio and no cables. Shared parts: `src/PhonaTap.hpp` (module base, triple

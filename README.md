@@ -47,6 +47,8 @@ syllables. English only (CMU Pronouncing Dictionary).
 many voices sound. OUT is polyphonic, with one channel for each voice. In lyrics mode, notes that
 start together sing the same syllable.
 
+**Quality.** Right-click > Quality: **Full** or **Eco (less CPU)**. At 44.1 and 48 kHz Eco uses about a third of the CPU, with a slightly brighter sound. At 88.2 kHz and above both are the same.
+
 **Beatbox (experimental).** Right-click > Lyrics/Beatbox. The text field then takes the symbols
 `B` (kick), `Pf` (snare), `t` (closed hat) and `.` (rest). Each gate plays the next symbol. Beatbox mode is mono
 and not finished.

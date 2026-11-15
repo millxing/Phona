@@ -52,6 +52,7 @@ struct Phona : Module {
 		int n; // voices built (the menu's maximum when it was built)
 		int body;
 		float rate;
+		bool eco; // built in eco quality
 	};
 	// Audio-thread state of one voice
 	struct Lane {
@@ -110,6 +111,7 @@ struct Phona : Module {
 	unsigned chordMask = 0;                // voices already in the chord
 	dsp::SchmittTrigger resetTrigger;
 	std::atomic<int> polyMax{1};           // menu: maximum voices (1..MAX_VOICES)
+	std::atomic<bool> eco{false};          // menu: Quality = Eco (no oversampling, coarser tract grid)
 	Lane lanes[MAX_VOICES];
 	// Display expanders (Phona View, Phona Scope): the voice whose note started last, samples until
 	// the next snapshots, each voice's recent output, and this round's captures
@@ -234,6 +236,7 @@ struct Phona : Module {
 		json_t* root = json_object();
 		json_object_set_new(root, "beatbox", json_boolean(beatMode.load()));
 		json_object_set_new(root, "voices", json_integer(polyMax.load()));
+		json_object_set_new(root, "eco", json_boolean(eco.load()));
 		json_object_set_new(root, "lyrics", json_string(getLyrics().c_str()));
 		return root;
 	}
@@ -241,6 +244,7 @@ struct Phona : Module {
 		setBeatMode(json_is_true(json_object_get(root, "beatbox")));
 		json_t* v = json_object_get(root, "voices");
 		setPolyMax(v && json_is_integer(v) ? (int) json_integer_value(v) : 1); // older patches: mono
+		eco = json_is_true(json_object_get(root, "eco")); // older patches: full quality
 		json_t* l = json_object_get(root, "lyrics");
 		if (l && json_is_string(l)) setLyrics(json_string_value(l));
 	}
@@ -249,6 +253,7 @@ struct Phona : Module {
 		setBeatMode(false);
 		setLyrics("");
 		setPolyMax(1);
+		eco = false;
 	}
 
 	// UI thread: maximum voices. The worker builds that many; the old voices sound until they arrive.
@@ -265,6 +270,7 @@ struct Phona : Module {
 	// Worker: builds whatever the audio thread currently wants, retries failures with backoff.
 	void work() {
 		int builtBody = -1, builtN = 0;
+		bool builtEco = false;
 		float builtRate = 0.f;
 		int backoff = 0;
 		int builtLyrVersion = -1, builtLyrBody = -1, builtTune = 0;
@@ -322,17 +328,18 @@ struct Phona : Module {
 			}
 			float r = desiredRate.load();
 			int nv = polyMax.load();
+			bool ec = eco.load();
 			// the active voice died: build a replacement, but not more often than once per second
 			if (rebuildRequest.exchange(false)) {
 				builtBody = -1;
 				backoff = 200;
 			}
 			if (backoff > 0) backoff--;
-			else if (r > 0.f && (b != builtBody || r != builtRate || nv != builtN)) {
-				Built* fresh = new Built{{}, 0, b, r};
+			else if (r > 0.f && (b != builtBody || r != builtRate || nv != builtN || ec != builtEco)) {
+				Built* fresh = new Built{{}, 0, b, r, ec};
 				bool ok = true;
 				for (int i = 0; i < nv && ok; i++) {
-					fresh->voice[i] = chim_new(r, b == 1 ? 1.0 : 0.0, 0.0);
+					fresh->voice[i] = chim_new_eco(r, b == 1 ? 1.0 : 0.0, 0.0, ec ? 1 : 0);
 					ok = fresh->voice[i] != nullptr;
 					if (ok) fresh->n++;
 				}
@@ -340,6 +347,7 @@ struct Phona : Module {
 					builtBody = b;
 					builtRate = r;
 					builtN = nv;
+					builtEco = ec;
 					buildFailed = false;
 					destroy(incoming.exchange(fresh)); // a stale unclaimed build is dropped
 				}
@@ -435,11 +443,12 @@ struct Phona : Module {
 		desiredBody = b;
 		desiredRate = args.sampleRate;
 		int wantN = polyMax.load();
+		bool wantEco = eco.load();
 
 		// take newly built voices only when the hand-back slot is free (old voices must go to the worker)
 		if (outgoing.load() == nullptr) {
 			if (Built* n = incoming.exchange(nullptr)) {
-				if (n->body == b && n->rate == args.sampleRate && n->n == wantN) {
+				if (n->body == b && n->rate == args.sampleRate && n->n == wantN && n->eco == wantEco) {
 					outgoing.store(active);
 					active = n;
 					for (Lane& L : lanes) L = Lane(); // new voices start in plain mode
@@ -1054,6 +1063,9 @@ void PhonaWidget::appendContextMenu(Menu* menu) {
 		[=]() { return (size_t) (module->polyMax.load() - 1); },
 		[=](size_t i) { module->setPolyMax((int) i + 1); }));
 	menu->addChild(createMenuLabel("Voices = V/OCT or GATE channels, up to the max; beatbox is mono"));
+	menu->addChild(createIndexSubmenuItem("Quality", {"Full", "Eco (less CPU)"},
+		[=]() { return (size_t) (module->eco.load() ? 1 : 0); },
+		[=](size_t i) { module->eco = (i == 1); }));
 	menu->addChild(new MenuSeparator);
 	menu->addChild(createCheckMenuItem("Lyrics mode", "", [=]() { return !module->beatMode.load(); }, [=]() { module->setBeatMode(false); }));
 	menu->addChild(createCheckMenuItem("Beatbox mode", "", [=]() { return module->beatMode.load(); }, [=]() { module->setBeatMode(true); }));

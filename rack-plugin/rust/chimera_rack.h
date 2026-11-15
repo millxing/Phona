@@ -9,6 +9,8 @@ typedef struct ChimParams {
 } ChimParams;
 // Allocating: never call on the audio thread.
 ChimVoice* chim_new(double sample_rate, double female, double child);
+// As chim_new; eco != 0 simulates at the output rate on a coarser tract grid (about a quarter of the CPU).
+ChimVoice* chim_new_eco(double sample_rate, double female, double child, int eco);
 void chim_free(ChimVoice* v);
 // Beatbox mode and monophonic hits (0/rest or invalid = cancel/mute, 1=B, 2=Pf, 3=t).
 void chim_set_beatbox(ChimVoice* v, int on);

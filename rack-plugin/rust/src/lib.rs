@@ -1049,9 +1049,9 @@ fn blend_vowel(vowels: &[ArticPatch; 5], x: f64) -> ArticPatch {
 }
 
 /// Probe the static tract geometry (allocates: worker thread only).
-fn velum_table(fs: f64, body: BodyMix, vowels: &[ArticPatch; 5]) -> [f64; VEL_N] {
+fn velum_table(fs: f64, body: BodyMix, vowels: &[ArticPatch; 5], eco: bool) -> [f64; VEL_N] {
     const MIN_AREA: f64 = 0.1; // cm²: below this anywhere along the tract counts as sealed
-    let mut airway = HumanAirway::new(fs, body.body());
+    let mut airway = if eco { HumanAirway::new_with(fs, body.body(), chimera::engine::ECO_MIN_SECTIONS) } else { HumanAirway::new(fs, body.body()) };
     airway.tract.velum_junction = true;
     let mut out = [1.4; VEL_N];
     for (j, slot) in out.iter_mut().enumerate() {
@@ -1165,14 +1165,22 @@ pub extern "C" fn chim_set_leveling(v: *mut ChimVoice, on: i32) {
 /// Build a voice. `female` and `child` are body axes in 0..1. Allocates. Returns null on failure.
 #[no_mangle]
 pub extern "C" fn chim_new(sample_rate: f64, female: f64, child: f64) -> *mut ChimVoice {
+    chim_new_eco(sample_rate, female, child, 0)
+}
+
+/// As `chim_new`; `eco` != 0 simulates at the output rate on a coarser tract grid (no 2×
+/// oversampling below 60 kHz): about a quarter of the CPU, a slightly different sound. Allocates.
+#[no_mangle]
+pub extern "C" fn chim_new_eco(sample_rate: f64, female: f64, child: f64, eco: i32) -> *mut ChimVoice {
+    let eco = eco != 0;
     let r = catch_unwind(|| {
         let fs = fin(sample_rate, 8000.0, 768000.0, 48000.0);
         let female = fin(female, 0.0, 1.0, 0.0);
         let body = BodyMix::new(female, fin(child, 0.0, 1.0, 0.0));
-        let mut engine = Engine::new(fs);
+        let mut engine = Engine::new_with(fs, eco);
         engine.set_body(body);
         let vowels = VOWELS.map(|v| vowel_artic(v, body).unwrap_or_default());
-        let velum_max = velum_table(fs, body, &vowels);
+        let velum_max = velum_table(fs, body, &vowels, eco);
         engine.voice_mut().airway.tract.velum_junction = true; // the nose stays reachable behind a lowered velum
         engine.voice_mut().artic.settle = true; // a held vowel then skips the geometry (CPU)
         engine.voice_mut().limiter = false; // true dynamics; `soft_clip` guards the output
@@ -1475,6 +1483,53 @@ mod tests {
     /// the engine's rate formula (glottis.rs) with the pull we send
     fn engine_rate(f0: f64, pull: f64) -> f64 {
         f0 * (1.0 - pull) + f0.min(48.0) * pull
+    }
+
+    /// Eco quality (no oversampling, coarser grid) stays stable at the extremes of every control,
+    /// for both bodies and the usual rates; full quality is run the same way as the reference.
+    /// Unstable grids show as tract pressures far above any lung pressure (soft_clip hides them at OUT).
+    #[test]
+    fn eco_is_stable_at_the_extremes() {
+        const P_MAX: f64 = 2.0e5; // dyn/cm²; 20 cmH2O lung pressure is about 2e4
+        let base = ChimParams { f0: 130.8, pressure: 8.0, breathiness: 0.15, tension: 0.5, brightness: 0.25, roughness: 0.1, vib_depth: 30.0, vib_rate: 5.5, vowel: 2.0, gate: 1.0, glide: 0.06, fry: 0.0, velum: -0.15, larynx: 0.0, ventricular: 0.0 };
+        let cases: Vec<(&str, fn(&mut ChimParams))> = vec![
+            ("vowels", |p| p.vowel = 0.0),
+            ("vowel u", |p| p.vowel = 4.0),
+            ("larynx up", |p| p.larynx = 3.2),
+            ("larynx down", |p| p.larynx = -3.2),
+            ("nasal i", |p| { p.velum = 1.4; p.vowel = 0.0 }),
+            ("nasal u", |p| { p.velum = 1.4; p.vowel = 4.0 }),
+            ("loud high", |p| { p.pressure = 20.0; p.f0 = 1000.0; p.tension = 1.5 }),
+            ("low fry", |p| { p.f0 = 40.0; p.fry = 1.0; p.roughness = 2.0 }),
+            ("breathy", |p| { p.breathiness = 1.5; p.brightness = -0.5; p.tension = -0.5 }),
+            ("pressed", |p| { p.ventricular = 1.0; p.brightness = 1.5; p.pressure = 20.0 }),
+            ("larynx up nasal i", |p| { p.larynx = 3.2; p.velum = 1.4; p.vowel = 0.0; p.pressure = 20.0 }),
+        ];
+        for eco in [1, 0] {
+            for fs in [44100.0, 48000.0, 96000.0] {
+                for female in [0.0, 1.0] {
+                    let v = chim_new_eco(fs, female, 0.0, eco);
+                    assert!(!v.is_null());
+                    let mut out = [0f32; 16];
+                    for (name, f) in &cases {
+                        let mut p = base;
+                        if female > 0.5 { p.f0 *= 2.0 }
+                        f(&mut p);
+                        let mut pmax = 0f64;
+                        for _ in 0..(0.4 * fs / 16.0) as usize {
+                            chim_set(v, &p);
+                            chim_render(v, out.as_mut_ptr(), 16);
+                            let net = &unsafe { &*v }.engine.voice().airway.net;
+                            for &x in &net.p[..net.n_nodes] {
+                                pmax = pmax.max(if x.is_finite() { x.abs() } else { f64::INFINITY });
+                            }
+                        }
+                        assert!(pmax < P_MAX, "eco {eco} fs {fs} female {female} {name}: max pressure {pmax:.3e}");
+                    }
+                    chim_free(v);
+                }
+            }
+        }
     }
 
     #[test]

@@ -492,6 +492,66 @@ index 8a41a99..72941b5 100644
              self.x.set(k, x + self.v[i] * dt);
          }
      }
+diff --git a/crates/chimera/src/engine.rs b/crates/chimera/src/engine.rs
+index 2cfd051..030dde1 100644
+--- a/crates/chimera/src/engine.rs
++++ b/crates/chimera/src/engine.rs
+@@ -44,6 +44,9 @@ pub struct VoiceInfo {
+     pub n_or: usize,
+ }
+ 
++/// Eco mode's fewest sections in the pharynx and oral tubes (see `HumanAirway::new_with`).
++pub const ECO_MIN_SECTIONS: usize = 3;
++
+ pub struct Engine {
+     pub sample_rate: f64,
+     body: BodyMix,
+@@ -56,17 +59,33 @@ pub struct Engine {
+     beat: BeatPlayer,
+     /// a creature playing instead of the human voice (whose clock then stands still)
+     creature: Option<CreatureVoice>,
++    /// eco: no oversampling and a coarser tract grid (about a quarter of the CPU). Rack fork.
++    eco: bool,
+ }
+ 
+ impl Engine {
+     pub fn new(sample_rate: f64) -> Engine {
++        Self::new_with(sample_rate, false)
++    }
++
++    /// `eco`: simulate at the output rate (no 2× oversampling below 60 kHz) on a coarser grid that
++    /// stays stable there. Rack fork; `new` is unchanged.
++    pub fn new_with(sample_rate: f64, eco: bool) -> Engine {
+         crate::init();
+         let body = BodyMix::MALE;
+-        Engine { sample_rate, body, voice: Self::make_voice(sample_rate, body), gate_level: 0.0, pos: 0, scratch: Vec::with_capacity(MAX_SCHEDULE), beat: BeatPlayer::new(), creature: None }
++        Engine { sample_rate, body, voice: Self::make_voice(sample_rate, body, eco), gate_level: 0.0, pos: 0, scratch: Vec::with_capacity(MAX_SCHEDULE), beat: BeatPlayer::new(), creature: None, eco }
++    }
++
++    pub fn eco(&self) -> bool {
++        self.eco
+     }
+ 
+-    fn make_voice(fs: f64, body: BodyMix) -> HumanVoice {
+-        let mut v = HumanVoice::new(fs, body.body(), if fs > 60000.0 { 1 } else { 2 });
++    fn make_voice(fs: f64, body: BodyMix, eco: bool) -> HumanVoice {
++        let mut v = if eco {
++            HumanVoice::new_with(fs, body.body(), 1, ECO_MIN_SECTIONS)
++        } else {
++            HumanVoice::new(fs, body.body(), if fs > 60000.0 { 1 } else { 2 })
++        };
+         v.set_source(&SourcePatch::f0(default_f0(body)));
+         v
+     }
+@@ -88,7 +107,7 @@ impl Engine {
+     pub fn set_body(&mut self, body: impl Into<BodyMix>) -> VoiceInfo {
+         let body: BodyMix = body.into();
+         let body = BodyMix::new(body.female, body.child);
+-        let prev = core::mem::replace(&mut self.voice, Self::make_voice(self.sample_rate, body));
++        let prev = core::mem::replace(&mut self.voice, Self::make_voice(self.sample_rate, body, self.eco));
+         self.body = body;
+         let mut src = SourcePatch::from_source(&prev.source);
+         src.f0 = Some(default_f0(body));
 diff --git a/crates/chimera/src/sources/glottis.rs b/crates/chimera/src/sources/glottis.rs
 index 83ce8e5..bffa4fe 100644
 --- a/crates/chimera/src/sources/glottis.rs
@@ -531,7 +591,7 @@ index 83ce8e5..bffa4fe 100644
          self.f0_now = f0;
  
 diff --git a/crates/chimera/src/voice/human_airway.rs b/crates/chimera/src/voice/human_airway.rs
-index 0b3fbc9..69cb825 100644
+index 0b3fbc9..2f5e727 100644
 --- a/crates/chimera/src/voice/human_airway.rs
 +++ b/crates/chimera/src/voice/human_airway.rs
 @@ -16,6 +16,14 @@ pub struct NoiseGains {
@@ -558,7 +618,7 @@ index 0b3fbc9..69cb825 100644
      /// max area change rate (cm²/s, body-scaled): a physiological guard against geometric jumps
      pub max_area_rate: f64,
      /// additional rate per cm² of current area (1/s)
-@@ -62,6 +72,8 @@ pub struct HumanAirway {
+@@ -62,11 +72,21 @@ pub struct HumanAirway {
      base_dt: f64,
      noise_list: Vec<NoiseSpec>,
      scratch_frame: HumanFrame,
@@ -567,7 +627,43 @@ index 0b3fbc9..69cb825 100644
  }
  
  impl HumanAirway {
-@@ -140,6 +152,7 @@ impl HumanAirway {
+     /// `fs`: internal sample rate (Hz).
+     pub fn new(fs: f64, body: HumanBody) -> Self {
++        Self::new_with(fs, body, 8)
++    }
++
++    /// As `new`, with the fewest sections a pharynx or oral tube may have. The default 8 keeps a
++    /// short tract finely divided at 2× oversampling; at 1× (≈48 kHz internal) 8 sections of a short
++    /// (female) pharynx are shorter than c·T and the grid is unstable (Courant 1.22). A smaller
++    /// minimum keeps every section at Courant ≤ 0.93 (the piriform fossa too). Rack fork: eco mode.
++    pub fn new_with(fs: f64, body: HumanBody, min_sections: usize) -> Self {
+         let k = body.scale;
+         let tract = HumanVocalTract::new(body);
+         let mut net = AirwayNetwork::new(fs);
+@@ -74,8 +94,11 @@ impl HumanAirway {
+         // node counts from the shortest expected lengths (larynx raised, lips retracted)
+         let ph_min_len = 8.7 * k * (0.55 + 0.45 * body.pharynx) - 1.6 * k;
+         let or_min_len = 8.3 * k - 1.0 * k;
+-        let n_ph = (8.0f64).max((ph_min_len / dx_min).floor()) as usize;
+-        let n_or = (8.0f64).max((or_min_len / dx_min).floor()) as usize;
++        let min_n = min_sections.max(2) as f64;
++        let n_ph = min_n.max((ph_min_len / dx_min).floor()) as usize;
++        let n_or = min_n.max((or_min_len / dx_min).floor()) as usize;
++        // the piriform fossa: 3 sections, fewer only when 3 would break the Courant limit (eco)
++        let n_fossa = if min_sections >= 8 { 3 } else { js_max(1.0, js_min(3.0, ((2.0 * k) / dx_min).floor())) as usize };
+ 
+         let tr_len = 12.0 * k;
+         let trachea = net.add_tube(TubeSpec::new("trachea", js_max(6.0, (tr_len / js_max(dx_min, 0.9 * k)).floor()) as usize, tr_len, Area::Uniform(2.5 * k * k)).wall(Some(WALL_TRACHEA)));
+@@ -99,7 +122,7 @@ impl HumanAirway {
+             })
+             .collect();
+         let nasal = net.add_tube(TubeSpec::new("nasal", n_na, na_len, Area::Profile(na_areas)).wall(Some(WALL_NASAL)).perimeter(3.2).viscous(2.5));
+-        let fossa = net.add_tube(TubeSpec::new("piriform", 3, 2.0 * k, Area::Uniform(0.9 * k * k)).wall(Some(WALL_SOFT)).perimeter(1.3));
++        let fossa = net.add_tube(TubeSpec::new("piriform", n_fossa, 2.0 * k, Area::Uniform(0.9 * k * k)).wall(Some(WALL_SOFT)).perimeter(1.3));
+ 
+         let lungs = net.add_pressure_node("lungs");
+         let tr_a = 2.5 * k * k;
+@@ -140,6 +163,7 @@ impl HumanAirway {
              ph_len: 8.8,
              or_len: 8.3,
              noise_gain: NoiseGains { glottis: 3.2e-6, constriction: 2.2e-6, teeth: 3.0e-6 },
@@ -575,7 +671,7 @@ index 0b3fbc9..69cb825 100644
              max_area_rate: 45.0,
              area_rate_gain: 40.0,
              seal_rate: 5.0,
-@@ -150,6 +163,7 @@ impl HumanAirway {
+@@ -150,6 +174,7 @@ impl HumanAirway {
              base_dt: 0.0,
              noise_list: Vec::with_capacity(8),
              scratch_frame: HumanFrame::with_capacity(),
@@ -583,7 +679,7 @@ index 0b3fbc9..69cb825 100644
          }
      }
  
-@@ -181,8 +195,15 @@ impl HumanAirway {
+@@ -181,8 +206,15 @@ impl HumanAirway {
  
      fn commit(&mut self, a: &HumanArtic, dt: f64) -> &HumanFrame {
          // compute into the frame kept from last time (its buffers are reused)
@@ -600,7 +696,7 @@ index 0b3fbc9..69cb825 100644
          let (ph_len, or_len) = self.tract.resample(a, &f, &mut self.ph_areas, &mut self.or_areas, Some(&mut self.ph_min), Some(&mut self.or_min));
          if dt > 0.0
              && let Some(base) = &self.base
-@@ -265,10 +286,11 @@ impl HumanAirway {
+@@ -265,10 +297,11 @@ impl HumanAirway {
      /// Register turbulence sources: glottis, narrowest supraglottal constriction, teeth obstacle.
      fn update_noise(&mut self, f: &HumanFrame) {
          let g = self.noise_gain;
@@ -613,7 +709,7 @@ index 0b3fbc9..69cb825 100644
          // narrowest open point in pharynx+oral (global position index p over concatenated tubes)
          let (n_ph, n_or) = (self.n_ph, self.n_or);
          let mut min_a = f64::INFINITY;
-@@ -304,7 +326,7 @@ impl HumanAirway {
+@@ -304,7 +337,7 @@ impl HumanAirway {
              let fwd = to_branch((n_tot - 2).min(min_i + off));
              let bwd = to_branch(0.max(min_i - off));
              if src >= 0 && fwd >= 0 && bwd >= 0 {
@@ -622,7 +718,7 @@ index 0b3fbc9..69cb825 100644
                  // obstacle source: a narrow anterior jet impinging on the incisors (sibilants)
                  let s_min = if min_i < n_ph_i { (min_i as f64 + 0.5) * dx_ph } else { self.ph_len + ((min_i - n_ph_i) as f64 + 0.5) * dx_or };
                  let behind = (f.teeth_s - s_min) / self.body.scale;
-@@ -315,7 +337,7 @@ impl HumanAirway {
+@@ -315,7 +348,7 @@ impl HumanAirway {
                      let teeth_i = n_ph_i + js_min((n_or - 2) as f64, js_max(0.0, js_round((f.teeth_s - self.ph_len) / dx_or))) as isize;
                      let tb = to_branch(teeth_i);
                      if tb >= 0 {
@@ -632,10 +728,10 @@ index 0b3fbc9..69cb825 100644
                  }
              }
 diff --git a/crates/chimera/src/voice/human_voice.rs b/crates/chimera/src/voice/human_voice.rs
-index 9092506..e9c3c31 100644
+index 9092506..0841f9d 100644
 --- a/crates/chimera/src/voice/human_voice.rs
 +++ b/crates/chimera/src/voice/human_voice.rs
-@@ -196,6 +196,16 @@ pub struct HumanVoice {
+@@ -196,14 +196,29 @@ pub struct HumanVoice {
      lim_release: f64,
      /// tissue may compress this far (cm) before the palate stops the articulator
      pub max_penetration: f64,
@@ -652,7 +748,21 @@ index 9092506..e9c3c31 100644
  }
  
  impl HumanVoice {
-@@ -250,6 +260,9 @@ impl HumanVoice {
+     /// A voice rendering at `fs_out`, simulating at `fs_out · oversample`.
+     pub fn new(fs_out: f64, body: HumanBody, oversample: usize) -> Self {
++        Self::new_with(fs_out, body, oversample, 8)
++    }
++
++    /// As `new`, with the airway's fewest tract sections (see `HumanAirway::new_with`).
++    pub fn new_with(fs_out: f64, body: HumanBody, oversample: usize, min_sections: usize) -> Self {
+         let m = oversample;
+         let fs = fs_out * m as f64;
+-        let airway = HumanAirway::new(fs, body);
++        let airway = HumanAirway::new_with(fs, body, min_sections);
+         let n_tract = airway.n_ph + airway.n_or;
+         let mut v = HumanVoice {
+             fs_out,
+@@ -250,6 +265,9 @@ impl HumanVoice {
              lim_hold_n: crate::math::js_round(0.025 * fs_out) as i64,
              lim_release: exp(-1.0 / (0.2 * fs_out)),
              max_penetration: 0.1,
@@ -662,7 +772,7 @@ index 9092506..e9c3c31 100644
          };
          let x = v.artic.x;
          v.airway.apply(&x, 0.0);
-@@ -309,7 +322,7 @@ impl HumanVoice {
+@@ -309,7 +327,7 @@ impl HumanVoice {
          let s = self.source;
          let g = &mut self.glottis.params;
          let k2 = self.airway.body.scale * self.airway.body.scale;
@@ -671,7 +781,7 @@ index 9092506..e9c3c31 100644
          g.abduction = (if s.voiced { 0.1 * s.breathiness * s.breathiness } else { 0.2 + 0.1 * s.breathiness }) * k2;
          self.base_abduction = g.abduction;
          self.base_closure = 0.0;
-@@ -362,6 +375,9 @@ impl HumanVoice {
+@@ -362,6 +380,9 @@ impl HumanVoice {
                  net.set_fixed_pressure(lungs, self.p_lung_now);
                  let a = self.glottis.next(net.p[sub_node] - net.p[supra]);
                  net.set_port_area(gp, a);
@@ -681,7 +791,7 @@ index 9092506..e9c3c31 100644
                  let y = net.step();
                  if self.dec.push(y) {
                      // output sample
-@@ -383,12 +399,14 @@ impl HumanVoice {
+@@ -383,12 +404,14 @@ impl HumanVoice {
                      } else {
                          self.lim_env *= self.lim_release;
                      }
