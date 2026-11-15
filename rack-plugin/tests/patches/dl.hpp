@@ -3,16 +3,19 @@
 #include <stdexcept>
 #include <string>
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
+// Declared here: <windows.h> clashes with the SIMD headers that rack.hpp includes.
+extern "C" {
+__declspec(dllimport) void* __stdcall LoadLibraryA(const char* name);
+__declspec(dllimport) void* __stdcall GetProcAddress(void* module, const char* name);
+__declspec(dllimport) unsigned long __stdcall GetLastError(void);
+}
 static const char* const PLUGIN_LIB = "plugin.dll";
 inline void* libOpen(const std::string& path) {
-	HMODULE h = LoadLibraryA(path.c_str());
+	void* h = LoadLibraryA(path.c_str());
 	if (!h) throw std::runtime_error("LoadLibrary failed: " + path + " (Windows error " + std::to_string(GetLastError()) + ")");
-	return (void*) h;
+	return h;
 }
-inline void* libSym(void* lib, const char* name) { return (void*) GetProcAddress((HMODULE) lib, name); }
+inline void* libSym(void* lib, const char* name) { return GetProcAddress(lib, name); }
 #else
 #include <dlfcn.h>
 #ifdef __APPLE__
