@@ -9,6 +9,7 @@ HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/phona-patch-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT HUP INT TERM
 RACK_DIR=$RACK_SDK
+TESTS_DIR="$HERE/.."
 . "$HERE/../platform.sh"
 for name in host_probe host_smoke; do
   ${CXX:-c++} -std=c++11 $TEST_FLAGS -Wno-deprecated-declarations -I"$RACK_SDK/include" -I"$RACK_SDK/dep/include" \

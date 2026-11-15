@@ -10,6 +10,8 @@ cd "$(dirname "$0")/.."
 RACK_DIR=${RACK_DIR:-../sdk/Rack-SDK}
 LOG=$(mktemp "${TMPDIR:-/tmp}/phona-ci.XXXXXX")
 trap 'rm -f "$LOG"' EXIT HUP INT TERM
+# On a failure, show the end of the full output (the filters below hide most of it).
+trap 'echo "--- Failed. Last lines of the full output:"; tail -60 "$LOG"' ERR
 # Show the useful lines only. Always exits 0, so that the exit status comes from the test.
 quiet() { grep -vE "warning:|note:|^ *[0-9]* \\||^ *\\||In file included|^ *\\^|^ *~" || true; }
 
