@@ -18,7 +18,7 @@ quiet() { grep -vE "warning:|note:|^ *[0-9]* \\||^ *\\||In file included|^ *\\^|
 echo "== Same sound as macOS (bit for bit), and the plugin's Rust unit tests"
 # Same CPU setting as the plugin build (Makefile: x64 only). The allocation test is a separate CI step.
 case "$RUST_TARGET" in x86_64*) export RUSTFLAGS="-C target-cpu=nehalem" ;; esac
-(cd rust && cargo test --release --target "$RUST_TARGET" -- \
+(cd rust && cargo test --release --lib --tests --target "$RUST_TARGET" -- \
 	--skip alloc_test::audio_path_does_not_allocate --nocapture) 2>&1 | tee -a "$LOG" | { grep -E "^(test |sung|lyrics|beatbox|output differs|.*expected 0x)|panicked" || true; }
 
 for t in beatbox poly view; do

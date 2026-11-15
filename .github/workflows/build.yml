@@ -152,8 +152,8 @@ jobs:
         working-directory: engine
         run: cargo test --release -p chimera
 
-      # Known problem (also on macOS): the beatbox path allocates memory on the audio thread.
-      # Shown as a warning until it is fixed; it does not fail the build.
+      # Allocation on the audio thread. On macOS arm64 the beatbox path allocates (test fails, 2026-11-15);
+      # on Linux x64 it passed. Not explained yet, so a failure here is a warning, not a build failure.
       - name: Known problem - beatbox allocates on the audio thread
         if: runner.os == 'Linux'
         continue-on-error: true
