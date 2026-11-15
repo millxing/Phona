@@ -25,6 +25,9 @@ ifdef ARCH_LIN
 endif
 ifdef ARCH_WIN
 	LDFLAGS += -lkernel32 -lntdll -luserenv -lws2_32 -ldbghelp -lsynchronization
+	# Put libgcc and winpthread inside plugin.dll. Otherwise it needs MinGW DLLs from Rack's folder, which can be
+	# older than the compiler's (for example, without nanosleep64), and then the plugin does not load.
+	LDFLAGS += -static-libgcc -Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic
 endif
 
 FLAGS += -I$(RUST_DIR)
