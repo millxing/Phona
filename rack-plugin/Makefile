@@ -24,7 +24,7 @@ ifdef ARCH_LIN
 	LDFLAGS += -lpthread -ldl -lm
 endif
 ifdef ARCH_WIN
-	LDFLAGS += -lws2_32 -luserenv -lbcrypt -lntdll -ladvapi32 -lkernel32 -ldbghelp
+	LDFLAGS += -lkernel32 -lntdll -luserenv -lws2_32 -ldbghelp -lsynchronization
 endif
 
 FLAGS += -I$(RUST_DIR)
