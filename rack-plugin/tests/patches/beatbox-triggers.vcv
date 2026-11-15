@@ -313,7 +313,8 @@
       "data": {
         "lyrics": "B t Pf t B . Pf t",
         "beatbox": true,
-        "voices": 1
+        "voices": 1,
+        "eco": false
       }
     },
     {
