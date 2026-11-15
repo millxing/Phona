@@ -1,0 +1,100 @@
+# Builds Phona for Windows (win-x64) and Linux (lin-x64) on GitHub's machines.
+# The finished .vcvplugin files are under "Artifacts" on the run's page in the Actions tab.
+# These builds are unsigned test builds, not releases.
+name: Build
+
+on:
+  push:
+    paths:
+      - 'rack-plugin/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+env:
+  RACK_SDK_VERSION: 2.6.6
+  # The engine: upstream chimera-vocal-synth at the pinned commit, plus rack-plugin/engine-fork.patch
+  ENGINE_REPO: https://github.com/jamesondh/chimera-vocal-synth
+  ENGINE_COMMIT: 092b16ce12b927d473c884ca2dfae53ce1b995df
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win-x64
+            os: windows-latest
+            rust_target: x86_64-pc-windows-gnu
+          - platform: lin-x64
+            os: ubuntu-22.04 # older glibc, so the plugin loads on more Linux systems
+            rust_target: x86_64-unknown-linux-gnu
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # Windows: keep LF line endings, or the engine patch does not apply
+      - name: Git line endings
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: Engine (upstream + fork patch)
+        run: |
+          git init -q engine
+          git -C engine fetch -q --depth 1 "$ENGINE_REPO" "$ENGINE_COMMIT"
+          git -C engine checkout -q FETCH_HEAD
+          git -C engine apply ../rack-plugin/engine-fork.patch
+
+      - name: Rack SDK
+        run: |
+          mkdir -p sdk
+          curl -fsSL -o sdk/sdk.zip "https://vcvrack.com/downloads/Rack-SDK-${RACK_SDK_VERSION}-${{ matrix.platform }}.zip"
+          unzip -q sdk/sdk.zip -d sdk
+
+      - name: Rust
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add ${{ matrix.rust_target }}
+          rustc --version
+
+      - name: MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit # so that make can find cargo
+          update: true
+          install: >-
+            make tar zstd unzip
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-jq
+
+      - name: Linux tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -yq jq zstd
+
+      # Diagnostic only: the system libraries the Rust library needs, compared with the Makefile's list
+      - name: Rust native libraries
+        working-directory: rack-plugin/rust
+        run: cargo rustc --release --lib --crate-type staticlib --target ${{ matrix.rust_target }} -- --print native-static-libs 2>&1 | grep native-static-libs || true
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        working-directory: rack-plugin
+        run: make -j4 dist
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        working-directory: rack-plugin
+        run: make -j4 dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Phona-${{ matrix.platform }}
+          path: rack-plugin/dist/*.vcvplugin
+          if-no-files-found: error

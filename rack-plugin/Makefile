@@ -1,14 +1,38 @@
 RACK_DIR ?= ../sdk/Rack-SDK
 
 RUST_DIR := rust
-RUST_LIB := $(RUST_DIR)/target/release/libchimera_rack.a
+
+# Platform (ARCH_MAC / ARCH_WIN / ARCH_LIN, ARCH_X64 / ARCH_ARM64). plugin.mk includes it again; that is harmless.
+include $(RACK_DIR)/arch.mk
+
+# Rack for Windows is built with MinGW, so the Rust library must use the GNU target, not the default MSVC one.
+ifdef ARCH_WIN
+	RUST_TARGET ?= x86_64-pc-windows-gnu
+endif
+ifdef RUST_TARGET
+	RUST_LIB := $(RUST_DIR)/target/$(RUST_TARGET)/release/libchimera_rack.a
+	CARGO_TARGET := --target $(RUST_TARGET)
+else
+	RUST_LIB := $(RUST_DIR)/target/release/libchimera_rack.a
+endif
+# Same minimum x64 CPU as Rack itself (compile.mk: -march=nehalem). Nehalem has no FMA, so results do not change.
+ifdef ARCH_X64
+	RUST_CPU := -C target-cpu=nehalem
+endif
+# System libraries the Rust standard library needs (`cargo rustc -- --print native-static-libs`)
+ifdef ARCH_LIN
+	LDFLAGS += -lpthread -ldl -lm
+endif
+ifdef ARCH_WIN
+	LDFLAGS += -lws2_32 -luserenv -lbcrypt -lntdll -ladvapi32 -lkernel32 -ldbghelp
+endif
 
 FLAGS += -I$(RUST_DIR)
 SOURCES += $(wildcard src/*.cpp)
 DISTRIBUTABLES += res
 DISTRIBUTABLES += $(wildcard LICENSE*)
 
-# Rust engine, built before linking (local prototype: host target only)
+# Rust engine, built before linking
 OBJECTS += $(RUST_LIB)
 # Always ask cargo (it tracks the engine sources and calibration data itself). The recipe must be on
 # the library target itself: with a separate phony prerequisite, GNU Make 3.81 (macOS) compares the
@@ -18,8 +42,8 @@ FORCE:
 $(RUST_LIB): FORCE
 # The path remap keeps the build machine's folder names (user name) out of the shared binary.
 	cd $(RUST_DIR) && MACOSX_DEPLOYMENT_TARGET=11.0 \
-		RUSTFLAGS="--remap-path-prefix=$(abspath ..)=. --remap-path-prefix=$(HOME)=~" \
-		cargo build --release
+		RUSTFLAGS="--remap-path-prefix=$(abspath ..)=. --remap-path-prefix=$(HOME)=~ $(RUST_CPU)" \
+		cargo build --release $(CARGO_TARGET)
 
 include $(RACK_DIR)/plugin.mk
 
