@@ -7,16 +7,25 @@ tract (talk box).
 The voice is the [Chimera vocal synthesis engine](https://github.com/jamesondh/chimera-vocal-synth)
 by Jameson Hodge (MIT). Phona puts the engine in a Rack module.
 
-**Status: prototype.** It works, but it is not in the VCV Library. The only build is for Macs with Apple Silicon.
+**Status: prototype.** It works, but it is not in the VCV Library. The Mac build is signed and
+notarized. The Windows and Linux builds are test builds: they pass the automatic tests, but nobody
+has played them on a real PC yet.
 
 ## Download and install
 
-1. Download the newest `.vcvplugin` file from [Releases](https://github.com/millxing/Phona/releases).
-2. Put it in `~/Library/Application Support/Rack2/plugins-mac-arm64/`.
-3. Restart Rack.
+1. Download the newest `.vcvplugin` file for your system from [Releases](https://github.com/millxing/Phona/releases).
+2. Close Rack. Remove older Phona `.vcvplugin` files from the plugins folder, then put the new file there:
+   - Mac (Apple Silicon): `~/Library/Application Support/Rack2/plugins-mac-arm64/`
+   - Windows: `%LOCALAPPDATA%\Rack2\plugins-win-x64\`
+   - Linux: `~/.local/share/Rack2/plugins-lin-x64/`
+3. Start Rack.
 
-Requirements: VCV Rack 2, macOS 11 or later, Apple Silicon. There is no Intel Mac, Windows or Linux build yet.
-The build is signed with an Apple Developer ID and notarized by Apple.
+Requirements: VCV Rack 2 and one of these systems:
+- macOS 11 or later on Apple Silicon. There is no Intel Mac build.
+- Windows 10 or 11, 64-bit.
+- Linux x64 with glibc 2.30 or newer (for example Ubuntu 20.04+).
+
+Windows and Linux testers: see [the tester guide](rack-plugin/docs/testing-windows-linux.md).
 
 ## Modules
 

@@ -235,6 +235,15 @@ slot is ignored); a click on a phrase chooses it. While attached, the phrases re
 - Headless Rack (2.6.6 Pro, `-h`, temp user folder) loaded 2.4.0 with Phona + Script + 2 Views + Scope from
   a patch, with no errors.
 - Not done: the Script's panel was not drawn to SVG for a look (only the headless load); not checked by ear.
+- CI timing (2026-11-16): the display CPU limits in `tests/view.cpp` now apply only off CI. GitHub runners
+  varied 2x within one run. Odd and not explained: in the last two runs, Phona with **no** display after
+  displays were removed measured 122-143% of one core (Linux and Windows x64), against 44-66% with 1 View. M4
+  Max: the same in all three cases. Hypothesis, not checked: denormal numbers on x64 (ARM has no slowdown for
+  them), maybe in telemetry averages that `chim_vis_capture` would reset. The test thread does not set
+  flush-to-zero; Rack's engine threads do, so Rack itself would not see it. To check: set FTZ/DAZ in the test,
+  or time a voice with and without capture on an x64 machine.
+- 2.4.0 released 2026-11-16 (Mac signed and notarized from d191b57; Windows/Linux from CI run 43800691873,
+  commit 16234b7, same plugin source).
 
 ### Phona View and Phona Scope: display expanders (2026-11-13, released in 2.2.0)
 
