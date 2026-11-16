@@ -7,9 +7,9 @@ tract (talk box).
 The voice is the [Chimera vocal synthesis engine](https://github.com/jamesondh/chimera-vocal-synth)
 by Jameson Hodge (MIT). Phona puts the engine in a Rack module.
 
-**Status: prototype.** It works, but it is not in the VCV Library. The Mac build is signed and
-notarized. The Windows and Linux builds are test builds: they pass the automatic tests, but nobody
-has played them on a real PC yet.
+Phona is not in the VCV Library yet. Download it from Releases (below). The Apple Silicon Mac
+build is signed and notarized by Apple. The Windows, Linux and Intel Mac builds are not signed.
+All four builds pass the same automatic tests.
 
 ## Download and install
 
