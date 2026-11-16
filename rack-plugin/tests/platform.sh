@@ -11,6 +11,11 @@ case "$(uname -s)" in
 Darwin)
 	TEST_LIBS="-framework CoreFoundation -framework Security -lpthread -ldl"
 	RUST_LIB=rust/target/release/libchimera_rack.a
+	# Intel build on an Apple Silicon Mac (CI): the test programs are Intel too and run through Rosetta
+	if [ "${RUST_TARGET:-}" = x86_64-apple-darwin ] && [ "$(uname -m)" = arm64 ]; then
+		TEST_FLAGS="-arch x86_64"
+		RUST_LIB=rust/target/x86_64-apple-darwin/release/libchimera_rack.a
+	fi
 	export DYLD_LIBRARY_PATH="$RACK_RUN${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 	;;
 Linux)

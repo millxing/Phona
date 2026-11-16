@@ -1,4 +1,5 @@
-# Builds Phona for Windows (win-x64) and Linux (lin-x64) on GitHub's machines.
+# Builds Phona for Windows (win-x64), Linux (lin-x64) and Intel Macs (mac-x64) on GitHub's machines.
+# (mac-arm64 is built and notarized on Rob's Mac.)
 # The finished .vcvplugin files are under "Artifacts" on the run's page in the Actions tab.
 # These builds are unsigned test builds, not releases.
 name: Build
@@ -29,27 +30,29 @@ jobs:
           - platform: lin-x64
             os: ubuntu-latest
             rust_target: x86_64-unknown-linux-gnu
-            # Old glibc (2.31): a plugin built here also loads on older Linux systems
-            container: ubuntu:20.04
+          # Cross-built on an Apple Silicon runner; the tests run through Rosetta
+          - platform: mac-x64
+            os: macos-latest
+            rust_target: x86_64-apple-darwin
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
     defaults:
       run:
         shell: bash
 
     steps:
-      - name: Linux tools and Rust (container)
+      - name: Libraries that libRack.so needs, for the tests (Linux)
         if: runner.os == 'Linux'
-        env:
-          DEBIAN_FRONTEND: noninteractive
         run: |
-          apt-get update -q
-          apt-get install -yq --no-install-recommends git curl unzip ca-certificates build-essential jq zstd python3
-          # Libraries that libRack.so needs, for the tests
-          apt-get install -yq --no-install-recommends libgl1 libx11-6 libasound2 libjack-jackd2-0 libpulse0
-          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends libgl1 libx11-6 libasound2t64 libjack-jackd2-0 libpulse0
+
+      - name: Rosetta, to run the Intel tests (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          arch -x86_64 /usr/bin/true 2>/dev/null || softwareupdate --install-rosetta --agree-to-license
+          arch -x86_64 /usr/bin/true && echo "Rosetta works"
+          command -v zstd >/dev/null && command -v jq >/dev/null || brew install zstd jq
 
       # Windows: keep LF line endings, or the engine patch does not apply
       - name: Git line endings
@@ -95,13 +98,43 @@ jobs:
         working-directory: rack-plugin
         run: make -j4 dist
 
-      - name: Build (Linux)
+      # VCV: Linux plugins must need at most glibc 2.23 and libstdc++ 5.4.0. Ubuntu 16.04 has exactly
+      # glibc 2.23 and gcc 5.4. Only the build runs in it: GitHub's own steps need a newer system.
+      - name: Build (Linux, in Ubuntu 16.04)
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD":/w -w /w/rack-plugin -e DEBIAN_FRONTEND=noninteractive ubuntu:16.04 bash -euo pipefail -c '
+            apt-get update -q
+            apt-get install -yq --no-install-recommends build-essential curl ca-certificates jq > /dev/null
+            # The zstd of Ubuntu 16.04 is too old for the .vcvplugin format
+            curl -fsSL https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz | tar -xz -C /tmp
+            make -s -C /tmp/zstd-1.5.6/programs -j4 zstd > /dev/null && cp /tmp/zstd-1.5.6/programs/zstd /usr/local/bin/
+            curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal > /dev/null
+            . "$HOME/.cargo/env"
+            gcc --version | head -1; ldd --version | head -1; rustc --version
+            make -j4 dist'
+          sudo chown -R "$(id -u):$(id -g)" .
+
+      - name: Check the Linux library versions
         if: runner.os == 'Linux'
         working-directory: rack-plugin
         run: |
-          make -j4 dist
-          echo "Newest glibc version the plugin needs:"
-          objdump -T plugin.so | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
+          NEED=$(objdump -T plugin.so | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "Newest glibc version the plugin needs: $NEED (VCV allows at most GLIBC_2.23)"
+          [ "$(printf '%s\n' GLIBC_2.23 "$NEED" | sort -V | tail -1)" = GLIBC_2.23 ]
+          # libstdc++ is linked into the plugin (plugin.mk), so it must need none from the system
+          if objdump -T plugin.so | grep -E 'GLIBCXX_|CXXABI_'; then echo "Needs the system libstdc++"; exit 1; fi
+
+      - name: Build (Mac Intel)
+        if: runner.os == 'macOS'
+        working-directory: rack-plugin
+        env:
+          RUST_TARGET: ${{ matrix.rust_target }}
+        run: |
+          make -j4 dist CROSS_COMPILE=x86_64-apple-darwin
+          lipo -archs dist/Phona/plugin.dylib
+          [ "$(lipo -archs dist/Phona/plugin.dylib)" = x86_64 ]
+          echo "Oldest macOS:"; otool -l dist/Phona/plugin.dylib | grep -A4 -E 'LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX' | grep -E 'minos|version'
 
       - uses: actions/upload-artifact@v4
         with:
@@ -114,7 +147,15 @@ jobs:
       - name: Rack Free (for the tests)
         run: |
           mkdir -p rack
-          if [ "$RUNNER_OS" = Windows ]; then
+          if [ "$RUNNER_OS" = macOS ]; then
+            curl -fsSL -o rack/RackFree.pkg "https://vcvrack.com/downloads/RackFree-${RACK_SDK_VERSION}-mac-x64+arm64.pkg"
+            pkgutil --expand-full rack/RackFree.pkg rack/inst
+            echo "Fundamental files in the package:"; find rack/inst -name 'Fundamental*'
+            echo "FUNDAMENTAL=$PWD/$(find rack/inst -name 'Fundamental-*-mac-x64.vcvplugin' | head -1)" >> "$GITHUB_ENV"
+            echo "RACK_PLUGINS=$PWD/rack/plugins" >> "$GITHUB_ENV"
+            echo "CPU_NAME=$(sysctl -n machdep.cpu.brand_string) (Intel code through Rosetta)" >> "$GITHUB_ENV"
+            exit 0
+          elif [ "$RUNNER_OS" = Windows ]; then
             curl -fsSL -o rack/RackFree.exe "https://vcvrack.com/downloads/RackFree-${RACK_SDK_VERSION}-win-x64.exe"
             7z x -y -orack/inst rack/RackFree.exe > /dev/null
             RUN=$(dirname "$(find rack/inst -name libRack.dll | head -1)")
@@ -138,8 +179,8 @@ jobs:
           mkdir -p rack/plugins && zstd -dc "$FUNDAMENTAL" | tar -x -C rack/plugins
           bash rack-plugin/tests/ci.sh
 
-      - name: Tests (Linux)
-        if: runner.os == 'Linux'
+      - name: Tests (Linux, Mac)
+        if: runner.os != 'Windows'
         env:
           RUST_TARGET: ${{ matrix.rust_target }}
         run: |

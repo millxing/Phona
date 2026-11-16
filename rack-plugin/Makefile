@@ -15,6 +15,15 @@ ifdef RUST_TARGET
 else
 	RUST_LIB := $(RUST_DIR)/target/release/libchimera_rack.a
 endif
+# Oldest macOS for the Rust code: 11 on Apple Silicon. On Intel, 10.12, the oldest that Rust supports
+# (Rack's own flags say 10.9, so Phona needs a newer Mac than Rack does).
+ifdef ARCH_MAC
+ifdef ARCH_X64
+	RUST_MACOS_MIN := 10.12
+else
+	RUST_MACOS_MIN := 11.0
+endif
+endif
 # Same minimum x64 CPU as Rack itself (compile.mk: -march=nehalem). Nehalem has no FMA, so results do not change.
 ifdef ARCH_X64
 	RUST_CPU := -C target-cpu=nehalem
@@ -44,7 +53,7 @@ OBJECTS += $(RUST_LIB)
 FORCE:
 $(RUST_LIB): FORCE
 # The path remap keeps the build machine's folder names (user name) out of the shared binary.
-	cd $(RUST_DIR) && MACOSX_DEPLOYMENT_TARGET=11.0 \
+	cd $(RUST_DIR) && MACOSX_DEPLOYMENT_TARGET=$(RUST_MACOS_MIN) \
 		RUSTFLAGS="--remap-path-prefix=$(abspath ..)=. --remap-path-prefix=$(HOME)=~ $(RUST_CPU)" \
 		cargo build --release $(CARGO_TARGET)
 
