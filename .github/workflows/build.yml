@@ -111,7 +111,7 @@ jobs:
             make -s -C /tmp/zstd-1.5.6/programs -j4 zstd > /dev/null && cp /tmp/zstd-1.5.6/programs/zstd /usr/local/bin/
             curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal > /dev/null
             . "$HOME/.cargo/env"
-            gcc --version | head -1; ldd --version | head -1; rustc --version
+            gcc --version | sed -n 1p; ldd --version | sed -n 1p; rustc --version # sed reads all: head can stop the writer (SIGPIPE, exit 141)
             make -j4 dist'
           sudo chown -R "$(id -u):$(id -g)" .
 
