@@ -8,6 +8,7 @@
 #include "../src/PhonaScope.cpp"
 #include "../src/PhonaScript.cpp"
 #include <cassert>
+#include <cstdlib>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -112,7 +113,7 @@ int main(int argc, char** argv) {
 	double without = 1e9, with = 1e9;
 	for (int r = 0; r < 3; r++) { without = std::min(without, cpu(false)); with = std::min(with, cpu(true)); }
 	std::cout << "3 voices: " << 100.0 * without << "% of one core; with View " << 100.0 * with << "%\n";
-	assert(with < without * 1.05 + 0.01);
+	if (!std::getenv("CI")) assert(with < without * 1.05 + 0.01); // not on CI: see the 8-View check
 	for (int c = 0; c < 3; c++) gate.setVoltage(0.f, c);
 	tick((int) (rate * 0.3f));
 
@@ -311,7 +312,9 @@ int main(int argc, char** argv) {
 				vs[0].rightExpander.module = &vs[1];
 			}
 			std::cout << "4 voices: " << 100.0 * none << "% of one core; with 1 View " << 100.0 * with1 << "%; with 8 Views " << 100.0 * with8 << "%\n";
-			assert(with8 < with1 * 1.05 + 0.01);
+			// Checked only off CI: on GitHub's shared machines one run can take 2x as long (measured: no
+			// display 143%, 1 View 66%), so no limit is safe there.
+			if (!std::getenv("CI")) assert(with8 < with1 * 1.05 + 0.01);
 		}
 		m.leftExpander.module = m.rightExpander.module = nullptr;
 		lab.rightExpander.module = nullptr;
