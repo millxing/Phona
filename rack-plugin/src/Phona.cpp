@@ -128,7 +128,7 @@ struct Phona : Module {
 	int curPhrase = -1;                    // the phrase being sung
 	unsigned scriptResetSeen = 0;
 	std::atomic<int> polyMax{1};           // menu: maximum voices (1..MAX_VOICES)
-	std::atomic<bool> eco{false};          // menu: Quality = Eco (no oversampling, coarser tract grid)
+	std::atomic<bool> eco{true};           // menu: Quality = Eco (no oversampling, coarser tract grid), the default
 	Lane lanes[MAX_VOICES];
 	// Display expanders (Phona View, Phona Scope): the voice whose note started last, samples until
 	// the next snapshots, each voice's recent output, and this round's captures
@@ -253,7 +253,7 @@ struct Phona : Module {
 		json_t* root = json_object();
 		json_object_set_new(root, "beatbox", json_boolean(beatMode.load()));
 		json_object_set_new(root, "voices", json_integer(polyMax.load()));
-		json_object_set_new(root, "eco", json_boolean(eco.load()));
+		json_object_set_new(root, "quality", json_string(eco.load() ? "eco" : "full"));
 		json_object_set_new(root, "lyrics", json_string(getLyrics().c_str()));
 		return root;
 	}
@@ -261,7 +261,10 @@ struct Phona : Module {
 		setBeatMode(json_is_true(json_object_get(root, "beatbox")));
 		json_t* v = json_object_get(root, "voices");
 		setPolyMax(v && json_is_integer(v) ? (int) json_integer_value(v) : 1); // older patches: mono
-		eco = json_is_true(json_object_get(root, "eco")); // older patches: full quality
+		// Full only when chosen in 2.4.1 or later. Older patches load in Eco, also 2.3.0/2.4.0 patches
+		// with "eco": false: Full was only the default then, not a choice.
+		json_t* q = json_object_get(root, "quality");
+		eco = !(q && json_is_string(q) && std::string(json_string_value(q)) == "full");
 		json_t* l = json_object_get(root, "lyrics");
 		if (l && json_is_string(l)) setLyrics(json_string_value(l));
 	}
@@ -270,7 +273,7 @@ struct Phona : Module {
 		setBeatMode(false);
 		setLyrics("");
 		setPolyMax(1);
-		eco = false;
+		eco = true;
 	}
 
 	// UI thread: maximum voices. The worker builds that many; the old voices sound until they arrive.
@@ -1193,9 +1196,9 @@ void PhonaWidget::appendContextMenu(Menu* menu) {
 		[=]() { return (size_t) (module->polyMax.load() - 1); },
 		[=](size_t i) { module->setPolyMax((int) i + 1); }));
 	menu->addChild(createMenuLabel("Voices = V/OCT or GATE channels, up to the max; beatbox is mono"));
-	menu->addChild(createIndexSubmenuItem("Quality", {"Full", "Eco (less CPU)"},
-		[=]() { return (size_t) (module->eco.load() ? 1 : 0); },
-		[=](size_t i) { module->eco = (i == 1); }));
+	menu->addChild(createIndexSubmenuItem("Quality", {"Eco", "Full (more CPU)"},
+		[=]() { return (size_t) (module->eco.load() ? 0 : 1); },
+		[=](size_t i) { module->eco = (i == 0); }));
 	menu->addChild(new MenuSeparator);
 	menu->addChild(createCheckMenuItem("Lyrics mode", "", [=]() { return !module->beatMode.load(); }, [=]() { module->setBeatMode(false); }));
 	menu->addChild(createCheckMenuItem("Beatbox mode", "", [=]() { return module->beatMode.load(); }, [=]() { module->setBeatMode(true); }));

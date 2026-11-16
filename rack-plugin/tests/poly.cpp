@@ -108,8 +108,10 @@ int main(int argc, char** argv) {
     assert(m.polyMax == 1);
     ready(); assert(m.active->n == 1);
 
-    // Quality: Eco rebuilds the voices (no oversampling, coarser grid). They sound, cost less,
-    // and the setting is saved; old patches load in full quality.
+    // Quality: Eco (the default) and Full build different voices. Eco sounds and costs less. Full is
+    // saved and restored; every patch older than 2.4.1 loads in Eco, even with "eco": false.
+    assert(m.eco.load()); // the old patch above
+    m.eco = false;
     m.setPolyMax(3); voct.setChannels(3); gate.setChannels(3); ready();
     auto cpu3 = [&](float* pk) {
         setGates(3, 10.f);
@@ -133,13 +135,20 @@ int main(int argc, char** argv) {
     if (rate < 60000.f) assert(eco < 0.8 * full);
     else for (int c=0;c<3;c++) assert(pkEco[c] == pkFull[c]);
     json_t* withEco = m.dataToJson();
-    assert(json_is_true(json_object_get(withEco, "eco")));
+    assert(std::string(json_string_value(json_object_get(withEco, "quality"))) == "eco");
     m.eco = false; m.dataFromJson(withEco); json_decref(withEco);
     assert(m.eco.load());
-    json_t* old2 = json_object();
-    m.dataFromJson(old2); json_decref(old2);
+    m.eco = false;
+    json_t* withFull = m.dataToJson();
+    assert(std::string(json_string_value(json_object_get(withFull, "quality"))) == "full");
+    m.eco = true; m.dataFromJson(withFull); json_decref(withFull);
     assert(!m.eco.load());
     ready(); assert(!m.active->eco);
+    json_t* old23 = json_object(); json_object_set_new(old23, "eco", json_false()); // 2.3.0/2.4.0 default
+    m.dataFromJson(old23); json_decref(old23);
+    assert(m.eco.load());
+    ready(); assert(m.active->eco);
+    { engine::Module::ResetEvent re; m.onReset(re); } assert(m.eco.load()); // Initialize
     std::cout << "poly module test passed\n";
     return 0;
 }

@@ -176,6 +176,20 @@ then about 25 ms of hiss near 6 kHz. Wider fold opening (abduction 0.4 to 1.0) c
 voicing. `soften_release` sets the breath target of the note-off plan to `CODA_STOP_BREATH` (0.5) for
 syllables that end in p, t, k, tʃ. Not confirmed by ear that the hiss is the blip the user means.
 
+### 2.4.1: Eco default, Library metadata, Phona Lab hidden (2026-11-17; for the VCV Library submission)
+
+- **Eco is the default** (user decision: "always Eco"). Saved as `"quality": "eco" | "full"`; the old
+  `"eco"` key is ignored, so every patch older than 2.4.1 opens in Eco (2.3.0/2.4.0 saved `"eco": false`
+  only because Full was the default). Full stays in the menu ("Full (more CPU)") and is kept once chosen.
+  `tests/poly.cpp` checks: default, save/load of both, old `"eco": false` -> Eco, Initialize -> Eco.
+- **plugin.json:** tags checked against Rack 2.6.6 `src/tag.cpp` ("Voltage-controlled oscillator" was not a
+  valid tag). manualUrl = README, changelogUrl = Releases, authorUrl = GitHub profile, no authorEmail
+  (author "Spunoza" is a pen name: user chose not to link the real name). Rack adds "VCV Library page" itself.
+- **Phona Lab** is `"hidden": true`: not in the browser, but old patches still load it. Removed from README.
+- **VCV submission** (Andrew Belt, 2026-11-16): four `make dist` files by email; Linux at most glibc 2.23 /
+  libstdc++ 5.4.0. CI builds win-x64, lin-x64 (Ubuntu 16.04 container) and mac-x64 (cross, tests via
+  Rosetta); mac-arm64 is `make notarize` here. User is already ID-verified with VCV.
+
 ### Eco quality (2026-11-15, released in 2.3.0; the user listened and approved it)
 
 Why: a forum user measured ~20% CPU per voice on Linux (Ryzen 5 7430U) against ~5% for Pink Trombone.

@@ -16,14 +16,15 @@ has played them on a real PC yet.
 1. Download the newest `.vcvplugin` file for your system from [Releases](https://github.com/millxing/Phona/releases).
 2. Close Rack. Remove older Phona `.vcvplugin` files from the plugins folder, then put the new file there:
    - Mac (Apple Silicon): `~/Library/Application Support/Rack2/plugins-mac-arm64/`
+   - Mac (Intel): `~/Library/Application Support/Rack2/plugins-mac-x64/`
    - Windows: `%LOCALAPPDATA%\Rack2\plugins-win-x64\`
    - Linux: `~/.local/share/Rack2/plugins-lin-x64/`
 3. Start Rack.
 
 Requirements: VCV Rack 2 and one of these systems:
-- macOS 11 or later on Apple Silicon. There is no Intel Mac build.
+- macOS 11 or later on Apple Silicon, or macOS 10.12 or later on Intel.
 - Windows 10 or 11, 64-bit.
-- Linux x64 with glibc 2.30 or newer (for example Ubuntu 20.04+).
+- Linux x64 with glibc 2.23 or newer (for example Ubuntu 16.04+).
 
 Windows and Linux testers: see [the tester guide](rack-plugin/docs/testing-windows-linux.md).
 
@@ -35,7 +36,6 @@ Windows and Linux testers: see [the tester guide](rack-plugin/docs/testing-windo
 | **Phona View** | 14 HP | Animated mouth and throat. |
 | **Phona Scope** | 20 HP | Instrument display: spectrum, formants, tract, vocal folds, vowel chart. |
 | **Phona Script** | 14 HP | 8 lyric phrases. A trigger or CV chooses the phrase. |
-| **Phona Lab** | 16 HP | Tuning tool for the sung consonants. |
 
 <img src="rack-plugin/docs/images/phona.png" width="300" alt="Phona panel">
 
@@ -57,7 +57,7 @@ syllables. English only (CMU Pronouncing Dictionary).
 many voices sound. OUT is polyphonic, with one channel for each voice. In lyrics mode, notes that
 start together sing the same syllable.
 
-**Quality.** Right-click > Quality: **Full** or **Eco (less CPU)**. At 44.1 and 48 kHz Eco uses about a third of the CPU, with a slightly brighter sound. At 88.2 kHz and above both are the same.
+**Quality.** Right-click > Quality: **Eco** (the default) or **Full (more CPU)**. At 44.1 and 48 kHz Full uses about two to three times the CPU of Eco, with a slightly darker sound. At 88.2 kHz and above both are the same. Patches made before 2.4.1 open in Eco.
 
 **Beatbox (experimental).** Right-click > Lyrics/Beatbox. The text field then takes the symbols
 `B` (kick), `Pf` (snare), `t` (closed hat) and `.` (rest). Each gate plays the next symbol. Beatbox mode is mono
@@ -67,8 +67,8 @@ and not finished.
 
 <img src="rack-plugin/docs/images/phona-view.png" width="280" alt="Phona View"> <img src="rack-plugin/docs/images/phona-scope.png" width="380" alt="Phona Scope">
 
-Put them next to Phona. They have no cables. You can put them on either side, and Phona Lab, View,
-Scope and Script can be in a chain in any order. You can use more than one View or Scope, for
+Put them next to Phona. They have no cables. You can put them on either side, and View, Scope and
+Script can be in a chain in any order. You can use more than one View or Scope, for
 example one View for each voice. A chain can have up to 8 expanders on each side of Phona. The link
 light comes on when the module finds a Phona.
 
@@ -102,10 +102,6 @@ its phrases replace the text in Phona's Lyrics field.
 - In Beatbox mode, each phrase is a beat pattern (`B t Pf .`).
 
 The phrase that sings is lit. The phrase that comes at the next gate has an amber frame.
-
-### Phona Lab
-
-A tuning tool for the consonants in lyrics mode. Put it next to Phona, adjust the knobs, and copy the values.
 
 ## Build from source
 

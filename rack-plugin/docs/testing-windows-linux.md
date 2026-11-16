@@ -10,7 +10,7 @@ It takes about 15 minutes. You need no special knowledge, only VCV Rack 2 and he
 
 - **Windows** 10 or 11 (64-bit), or **Linux** (64-bit x86, Ubuntu 20.04 or newer, or a similar distribution).
 - **VCV Rack 2.6** or newer. Rack Free is enough.
-- The file `Phona-2.3.0-win-x64.vcvplugin` (Windows) or `Phona-2.3.0-lin-x64.vcvplugin` (Linux).
+- The file `Phona-2.4.1-win-x64.vcvplugin` (Windows) or `Phona-2.4.1-lin-x64.vcvplugin` (Linux).
   Rob gives you the link.
 
 ## Install
@@ -30,7 +30,7 @@ same plugins folder.
 Do the tests in this order. If a test fails, write down what you saw and continue with the next test.
 
 **1. Phona loads.** Right-click on an empty area of the rack. Type `Phona` in the search field.
-You should see 4 modules: Phona, Phona View, Phona Scope and Phona Lab.
+You should see 4 modules: Phona, Phona View, Phona Scope and Phona Script.
 
 **2. It sings.** Add **Phona**. Connect its **OUT** to an **Audio** module, and choose your audio
 device there. With no cable in **GATE**, Phona sings all the time. Turn **VOWEL** and **PITCH**.
@@ -54,8 +54,8 @@ link light comes on, and the mouth and the displays move while Phona sings.
 - Use a sample rate of 48 kHz (Audio module or Engine menu).
 - Read the number on Phona with **1 voice** singing, then with **4 voices** singing.
 - Listen for clicks, crackles or dropouts with 4 voices.
-- Right-click on Phona > **Quality** > **Eco (less CPU)**. Read the numbers for 1 and 4 voices again.
-  Eco must use much less CPU. The sound is a little brighter; that is normal.
+- Phona starts in **Eco** quality. Then right-click on Phona > **Quality** > **Full (more CPU)** and read
+  the numbers for 1 and 4 voices again. Full must use much more CPU. The sound is a little darker; that is normal.
 
 **7. Beatbox (optional, experimental).** Right-click on Phona > **Lyrics/Beatbox** > Beatbox. Type
 `B t Pf t` in the text field. Each gate plays the next sound (kick, hat, snare, hat). These sounds are
@@ -76,8 +76,8 @@ Audio sample rate and block size:
 3. Lyrics:                yes / no
 4. Four voices:           yes / no
 5. Displays:              yes / no
-6. CPU, 1 voice:          Full ___ %   Eco ___ %
-   CPU, 4 voices:         Full ___ %   Eco ___ %
+6. CPU, 1 voice:          Eco ___ %   Full ___ %
+   CPU, 4 voices:         Eco ___ %   Full ___ %
    Clicks or dropouts:    none / some / many
 7. Beatbox (optional):    ok / problem / not tested
 

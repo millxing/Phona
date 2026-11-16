@@ -915,7 +915,7 @@
       "lyrics": "",
       "beatbox": false,
       "voices": 1,
-      "eco": false
+      "quality": "eco"
     }
   }
 }

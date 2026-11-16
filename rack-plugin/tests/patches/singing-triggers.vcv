@@ -314,7 +314,7 @@
         "lyrics": "doh ray mee fah soh lah tee doh",
         "beatbox": false,
         "voices": 1,
-        "eco": false
+        "quality": "eco"
       }
     },
     {
