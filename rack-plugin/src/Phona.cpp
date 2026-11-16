@@ -3,6 +3,7 @@
 #include "panel.hpp"
 #include "PhonaLab.hpp"
 #include "PhonaTap.hpp"
+#include "PhonaScript.hpp"
 #include <atomic>
 #include <thread>
 #include <mutex>
@@ -79,6 +80,11 @@ struct Phona : Module {
 		int n;
 		bool keep; // same text and body as the build before (only the Lab's values changed): the song goes on
 		std::vector<std::array<char, 32>> texts; // each syllable's spelling, for Phona View (audio thread reads)
+		// From a Phona Script: the phrases are joined into one text; phrase i is items
+		// pStart[i] .. pStart[i] + pLen[i] - 1 (syllables, or beat symbols). pLen 0 = no phrase.
+		bool script;
+		int pStart[PhonaScript::SLOTS];
+		int pLen[PhonaScript::SLOTS];
 	};
 	std::mutex lyricsMutex;                // guards `lyrics` and `sylTexts` (UI and worker threads only)
 	std::string lyrics;
@@ -110,6 +116,17 @@ struct Phona : Module {
 	int chordSyl = 0;
 	unsigned chordMask = 0;                // voices already in the chord
 	dsp::SchmittTrigger resetTrigger;
+	// Phona Script beside this module: the audio thread copies its phrases into `scriptText`
+	// (sequence lock: odd while written) for the worker, and picks the phrase at each new syllable.
+	char scriptText[PhonaScript::SLOTS][PhonaScript::LEN] = {};
+	char scriptTmp[PhonaScript::SLOTS][PhonaScript::LEN] = {}; // audio thread
+	char scriptWork[PhonaScript::SLOTS][PhonaScript::LEN] = {}; // worker thread
+	std::atomic<unsigned> scriptTextSeq{0};
+	std::atomic<bool> scriptOn{false};     // a Script supplies the text (worker reads `scriptText`)
+	bool scriptLinked = false;             // audio thread
+	unsigned scriptSrcSeq = ~0u;           // the Script's text version copied last
+	int curPhrase = -1;                    // the phrase being sung
+	unsigned scriptResetSeen = 0;
 	std::atomic<int> polyMax{1};           // menu: maximum voices (1..MAX_VOICES)
 	std::atomic<bool> eco{false};          // menu: Quality = Eco (no oversampling, coarser tract grid)
 	Lane lanes[MAX_VOICES];
@@ -290,7 +307,37 @@ struct Phona : Module {
 				}
 				double tune[CHIM_TUNE_N];
 				for (int i = 0; i < CHIM_TUNE_N; i++) tune[i] = tuneShared[i].load();
-				ChimLyrics* l = beat || text.empty() ? nullptr : chim_lyrics_new(text.c_str(), b == 1 ? 1.0 : 0.0, tune);
+				bool scr = scriptOn.load();
+				int pStart[PhonaScript::SLOTS] = {}, pLen[PhonaScript::SLOTS] = {};
+				ChimLyrics* l = nullptr;
+				if (scr) {
+					// the Script's phrases, joined. Each phrase's range = the syllables (or beat
+					// symbols) the text up to its end has, minus those before it.
+					std::string phr[PhonaScript::SLOTS];
+					readScriptText(phr);
+					text.clear();
+					int end = 0;
+					for (int i = 0; i < PhonaScript::SLOTS; i++) {
+						if (!PhonaScript::hasWords(phr[i])) continue;
+						text += (text.empty() ? "" : " ") + phr[i];
+						int len;
+						if (beat) {
+							std::istringstream in(text);
+							std::string token;
+							len = 0;
+							while (in >> token) len++;
+						}
+						else {
+							chim_lyrics_free(l); // the text before this phrase
+							l = chim_lyrics_new(text.c_str(), b == 1 ? 1.0 : 0.0, tune);
+							len = (int) chim_lyrics_len(l);
+						}
+						pStart[i] = end;
+						pLen[i] = std::max(0, len - end);
+						end = std::max(end, len);
+					}
+				}
+				else if (!beat && !text.empty()) l = chim_lyrics_new(text.c_str(), b == 1 ? 1.0 : 0.0, tune);
 				int n = (int) chim_lyrics_len(l);
 				std::vector<std::string> texts;
 				for (int i = 0; i < n; i++) {
@@ -303,7 +350,9 @@ struct Phona : Module {
 					sylTexts = texts;
 				}
 				bool keep = lv == builtLyrVersion && b == builtLyrBody;
-				BuiltLyr* fresh = new BuiltLyr{l, {}, beat, lv, b, n, keep, {}};
+				BuiltLyr* fresh = new BuiltLyr{l, {}, beat, lv, b, n, keep, {}, scr, {}, {}};
+				std::memcpy(fresh->pStart, pStart, sizeof(pStart));
+				std::memcpy(fresh->pLen, pLen, sizeof(pLen));
 				for (const std::string& t : texts) {
 					std::array<char, 32> a{};
 					std::strncpy(a.data(), t.c_str(), a.size() - 1);
@@ -386,34 +435,116 @@ struct Phona : Module {
 		return true;
 	}
 
-	// Next syllable for voice `c` (of `n`): the chord's syllable if the voice joins a chord,
-	// else the next one in the lyrics (it starts a new chord).
-	int pickSyllable(int c, int n, float sampleRate) {
+	// Worker: a consistent copy of the Script's phrases (the audio thread may write a new one).
+	void readScriptText(std::string* out) {
+		auto& buf = scriptWork;
+		for (;;) {
+			unsigned q = scriptTextSeq.load(std::memory_order_acquire);
+			if (q & 1) { std::this_thread::yield(); continue; }
+			std::memcpy(buf, scriptText, sizeof(buf));
+			std::atomic_thread_fence(std::memory_order_acquire);
+			if (scriptTextSeq.load(std::memory_order_relaxed) == q) break;
+		}
+		for (int i = 0; i < PhonaScript::SLOTS; i++) {
+			buf[i][PhonaScript::LEN - 1] = 0;
+			out[i] = buf[i];
+		}
+	}
+
+	// Audio thread, at each control tick: copy a new text from the Phona Script beside this module.
+	void syncScript() {
+		PhonaScript* sc = (PhonaScript*) familyNear(this, modelPhonaScript);
+		if ((sc != nullptr) != scriptLinked) {
+			scriptLinked = sc != nullptr;
+			scriptSrcSeq = ~0u;
+			if (!sc) {
+				scriptOn = false; // back to Phona's own text
+				lyricsVersion++;
+			}
+		}
+		if (!sc) return;
+		unsigned q = sc->pubSeq.load(std::memory_order_acquire);
+		if ((q & 1) || q == scriptSrcSeq) return;
+		std::memcpy(scriptTmp, sc->pub, sizeof(scriptTmp));
+		std::atomic_thread_fence(std::memory_order_acquire);
+		if (sc->pubSeq.load(std::memory_order_relaxed) != q) return; // changed while copied: next tick
+		scriptTextSeq.fetch_add(1, std::memory_order_acq_rel);
+		std::atomic_thread_fence(std::memory_order_release);
+		std::memcpy(scriptText, scriptTmp, sizeof(scriptText));
+		std::atomic_thread_fence(std::memory_order_release);
+		scriptTextSeq.fetch_add(1, std::memory_order_release);
+		scriptSrcSeq = q;
+		scriptOn = true;
+		lyricsVersion++;
+	}
+
+	// The next item (syllable or beat symbol) of `n` in `from`. With a Phona Script: from the
+	// phrase it chose (a new choice, or a RESET, starts that phrase from its first item), and the
+	// phrase repeats. Without: through the whole text.
+	int nextItem(const BuiltLyr* from, int n) {
+		if (from && from->script) {
+			PhonaScript* sc = (PhonaScript*) familyNear(this, modelPhonaScript);
+			if (sc) {
+				int w = sc->want.load();
+				unsigned r = sc->resetSeq.load();
+				bool restart = r != scriptResetSeen;
+				scriptResetSeen = r;
+				if (w >= 0 && w < PhonaScript::SLOTS && from->pLen[w] > 0 && (w != curPhrase || restart)) {
+					curPhrase = w;
+					syl = from->pStart[w];
+				}
+			}
+			if (curPhrase < 0 || curPhrase >= PhonaScript::SLOTS || from->pLen[curPhrase] <= 0) {
+				curPhrase = -1;
+				for (int i = 0; i < PhonaScript::SLOTS && curPhrase < 0; i++)
+					if (from->pLen[i] > 0) curPhrase = i;
+				if (curPhrase >= 0) syl = from->pStart[curPhrase];
+			}
+			if (curPhrase >= 0) {
+				int lo = from->pStart[curPhrase], hi = std::min(n, lo + from->pLen[curPhrase]);
+				if (sc) sc->current = curPhrase;
+				if (lo < hi) {
+					if (syl < lo || syl >= hi) syl = lo;
+					int s = syl;
+					syl = syl + 1 >= hi ? lo : syl + 1;
+					return s;
+				}
+			}
+		}
+		if (syl >= n) syl = 0;
+		int s = syl;
+		syl = (syl + 1) % n;
+		return s;
+	}
+
+	// Next syllable for voice `c` from `from` (`n` syllables): the chord's syllable if the voice
+	// joins a chord, else the next one (it starts a new chord).
+	int pickSyllable(int c, const BuiltLyr* from, int n, float sampleRate) {
 		if (chordLeft > 0 && !(chordMask & (1u << c)) && chordSyl < n) {
 			chordMask |= 1u << c;
 			return chordSyl;
 		}
-		if (syl >= n) syl = 0;
-		chordSyl = syl;
+		chordSyl = nextItem(from, n);
 		chordMask = 1u << c;
 		chordLeft = std::max(1, (int) (sampleRate * CHORD_WINDOW));
-		syl = (syl + 1) % n;
 		return chordSyl;
 	}
 
-	// The display expanders beside this module (also behind other Phona expanders): about 40
-	// times a second, a snapshot of the voice each one shows goes into its triple buffer. A voice
-	// is captured once per round, also when both show it (a capture resets the engine's telemetry
-	// averages). Allocation-free.
+	// All display expanders beside this module (also behind other Phona expanders, any number of
+	// Views and Scopes): about 40 times a second, a snapshot of the voice each one shows goes into
+	// its triple buffer. A voice is captured once per round, also when several show it (a capture
+	// resets the engine's telemetry averages). Allocation-free.
+	static constexpr int MAX_TAPS = 2 * FAMILY_HOPS;
 	void captureTaps(float sampleRate, int nOut, bool lyr, bool beat) {
 		if (--viewCtr > 0) return;
 		viewCtr = std::max(1, (int) (sampleRate / 40.f));
-		PhonaTap* taps[2] = {(PhonaTap*) familyNear(this, modelPhonaView), (PhonaTap*) familyNear(this, modelPhonaScope)};
-		tapsOn = taps[0] || taps[1];
+		Module* found[MAX_TAPS];
+		int nTaps = familyAll(this, modelPhonaView, modelPhonaScope, found, MAX_TAPS);
+		tapsOn = nTaps > 0;
 		if (!tapsOn || !active) return;
 		unsigned got = 0;
-		for (PhonaTap* t : taps) {
-			if (!t) continue;
+		for (int k = 0; k < nTaps; k++) {
+			PhonaTap* t = (PhonaTap*) found[k];
 			int want = (int) t->params[PhonaTap::VOICE_PARAM].getValue();
 			int c = clamp(want <= 0 ? newestVoice : want - 1, 0, active->n - 1);
 			if (!(got & (1u << c))) {
@@ -571,9 +702,7 @@ struct Phona : Module {
 					&& activeLyr->body == active->body && !activeLyr->beats.empty();
 				int token = 0;
 				if (ready) {
-					if (syl >= (int) activeLyr->beats.size()) syl = 0;
-					token = activeLyr->beats[syl];
-					syl = (syl + 1) % activeLyr->beats.size();
+					token = activeLyr->beats[nextItem(activeLyr, (int) activeLyr->beats.size())];
 				}
 				beatShown = ready ? token : -1;
 				chim_beat_hit(voice[0], token);
@@ -603,7 +732,7 @@ struct Phona : Module {
 					bool swap = lyrPending && lyrPending->keep && lyrPending->l && lyrPending->n > 0
 						&& lyrPending->body == active->body && lyrOutgoing.load() == nullptr && lyricsIdle(c);
 					BuiltLyr* from = swap ? lyrPending : activeLyr;
-					int s = pickSyllable(c, from->n, args.sampleRate);
+					int s = pickSyllable(c, from, from->n, args.sampleRate);
 					chim_note_on(voice[c], from->l, s); // with a swap: reads the old plans for the last time
 					if (swap) {
 						lyrOutgoing.store(activeLyr);
@@ -646,6 +775,7 @@ struct Phona : Module {
 			// a syllable's plan go to the worker, the others to the voices.
 			// (directly, or with other Phona expanders between them)
 			Module* lab = familyNear(this, modelPhonaLab);
+			syncScript();
 			bool replan = false;
 			for (int i = 0; i < CHIM_TUNE_N; i++) {
 				double x = lab ? (double) lab->params[i].getValue() : PhonaLab::spec(i).def;
@@ -1072,6 +1202,7 @@ void PhonaWidget::appendContextMenu(Menu* menu) {
 	menu->addChild(createMenuLabel("Lyrics: next syllable per gate; empty = vowel"));
 	menu->addChild(createMenuLabel("Beatbox: B kick, Pf snare, t hat, . rest"));
 	menu->addChild(createMenuLabel("Space-separated; invalid = silent step (?)"));
+	if (module->scriptOn.load()) menu->addChild(createMenuLabel("A Phona Script is attached: its phrases replace this text"));
 	LyricsField* field = new LyricsField;
 	field->module = module;
 	field->setText(module->getLyrics());

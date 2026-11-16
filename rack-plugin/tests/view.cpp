@@ -6,6 +6,7 @@
 #include "../src/PhonaLab.cpp"
 #include "../src/PhonaView.cpp"
 #include "../src/PhonaScope.cpp"
+#include "../src/PhonaScript.cpp"
 #include <cassert>
 #include <iostream>
 #include <fstream>
@@ -255,6 +256,152 @@ int main(int argc, char** argv) {
 	}
 	gate.setVoltage(0.f, 0);
 	m.setLyrics(""); ready();
+
+	// ---------------------------------------------------------------- Several displays
+	// Phona | View x8 | Scope: every View within the chain limit gets its own voice, and the Scope
+	// behind them too; a 9th View is out of reach and its link light stays off. Lab on the left.
+	{
+		unlinkAll();
+		PhonaView vs[9];
+		for (PhonaView& v : vs) v.model = modelPhonaView;
+		voct.channels = 4; gate.channels = 4;
+		for (int c = 0; c < 4; c++) gate.setVoltage(10.f, c);
+		for (int k = 0; k < 9; k++) vs[k].params[PhonaTap::VOICE_PARAM].setValue((float) (k % 4 + 1));
+		link(&lab, &m); link(&m, &vs[0]);
+		for (int k = 0; k < 7; k++) link(&vs[k], &vs[k + 1]);
+		link(&vs[7], &scope);   // the 9th module on the right: out of reach
+		link(&scope, &vs[8]);   // the 10th: also out of reach
+		unsigned c0 = scope.seq;
+		for (int i = 0; i < (int) (rate * 0.25f); i++) {
+			tick(1);
+			for (PhonaView& v : vs) v.process(args);
+		}
+		// FAMILY_HOPS = 8 expanders on each side: the Scope is the 9th, so it must not be reached.
+		bool scopeFed = scope.seq > c0;
+		std::cout << "views fed:";
+		for (int k = 0; k < 9; k++) std::cout << " " << (vs[k].seq > 0) << (vs[k].linked ? "L" : "-");
+		std::cout << ", scope " << scopeFed << (scope.linked ? "L" : "-") << "\n";
+		for (int k = 0; k < 8; k++) {
+			assert(vs[k].seq > 0 && vs[k].linked);
+			assert(vs[k].read().voice == k % 4 && vs[k].read().vis.valid);
+		}
+		// beyond the limit: no data, and no link light (the light means "fed")
+		assert(!scopeFed && !scope.linked);
+		assert(vs[8].seq == 0 && !vs[8].linked);
+		// CPU: 8 Views, each with its own voice, against none (4 voices sound)
+		{
+			auto run = [&]() {
+				auto t0 = std::chrono::steady_clock::now();
+				for (int i = 0; i < (int) rate; i++) m.process(args);
+				return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+			};
+			double with8 = run();
+			m.rightExpander.module = nullptr;
+			double none = run();
+			m.rightExpander.module = &vs[0];
+			with8 = std::min(with8, run());
+			std::cout << "4 voices: " << 100.0 * none << "% of one core; with 8 Views " << 100.0 * with8 << "%\n";
+			assert(with8 < none * 1.05 + 0.01);
+		}
+		for (int c = 0; c < 4; c++) gate.setVoltage(0.f, c);
+		m.leftExpander.module = m.rightExpander.module = nullptr;
+		lab.rightExpander.module = nullptr;
+		scope.leftExpander.module = scope.rightExpander.module = nullptr;
+		voct.channels = 1; gate.channels = 1;
+		tick((int) (rate * 0.3f));
+	}
+
+	// ---------------------------------------------------------------- Phona Script
+	{
+		unlinkAll();
+		PhonaScript sc;
+		sc.model = modelPhonaScript;
+		link(&m, &sc); link(&sc, &view); // the View sees Phona through the Script
+		auto tickS = [&](int n) { for (int i = 0; i < n; i++) { tick(1); sc.process(args); } };
+		auto trig = [&](int input, float v = 10.f) {
+			sc.inputs[input].setVoltage(v); tickS(32);
+			sc.inputs[input].setVoltage(0.f); tickS(32);
+		};
+		// one note: returns the syllable index Phona picked
+		auto sing = [&]() {
+			gate.setVoltage(10.f, 0); tickS((int) (rate * 0.15f));
+			int s = m.sylShown.load();
+			gate.setVoltage(0.f, 0); tickS((int) (rate * 0.25f));
+			return s;
+		};
+		auto scriptReady = [&](bool on) {
+			tickS(64);
+			ready();
+			assert(m.activeLyr && m.activeLyr->script == on);
+		};
+		m.setLyrics("ignored when a script is on");
+		sc.setPhrase(0, "one two");
+		sc.setPhrase(2, "red blue green");
+		scriptReady(true);
+		const Phona::BuiltLyr* L = m.activeLyr;
+		std::cout << "script phrases: start " << L->pStart[0] << "/" << L->pStart[2] << ", length " << L->pLen[0] << "/" << L->pLen[1] << "/" << L->pLen[2] << ", total " << L->n << "\n";
+		assert(L->pStart[0] == 0 && L->pLen[0] == 2 && L->pLen[1] == 0 && L->pStart[2] == 2 && L->pLen[2] == 3 && L->n == 5);
+		assert(sc.lights[PhonaScript::LINK_LIGHT].getBrightness() > 0.f && view.linked);
+		// a phrase repeats
+		int a = sing(), b = sing(), c = sing();
+		assert(a == 0 && b == 1 && c == 0 && sc.current == 0);
+		// NEXT in the middle of a phrase: the next gate starts phrase 3 (phrase 2 is empty)
+		trig(PhonaScript::NEXT_INPUT);
+		assert(sc.want == 2 && sc.current == 0); // not yet: at the next gate
+		a = sing(); b = sing(); c = sing(); int d = sing();
+		assert(a == 2 && b == 3 && c == 4 && d == 2 && sc.current == 2);
+		// the View shows the sung syllable through the Script
+		assert(std::string(view.read().syllable) == std::string(L->texts[2].data()));
+		// NEXT after the last phrase: back to phrase 1
+		trig(PhonaScript::NEXT_INPUT);
+		assert(sing() == 0);
+		// RESET: phrase 1 from syllable 1, also when phrase 1 is already chosen
+		trig(PhonaScript::RESET_INPUT);
+		assert(sing() == 0);
+		// SELECT: 2.6 V = phrase 3; 1.5 V = phrase 2, which is empty: no change
+		sc.inputs[PhonaScript::SELECT_INPUT].channels = 1;
+		sc.inputs[PhonaScript::SELECT_INPUT].setVoltage(2.6f); tickS(32);
+		assert(sing() == 2);
+		sc.inputs[PhonaScript::SELECT_INPUT].setVoltage(1.5f); tickS(32);
+		assert(sing() == 3);
+		sc.inputs[PhonaScript::SELECT_INPUT].channels = 0;
+		// Phona's own RESET: the current phrase from its first syllable
+		m.inputs[Phona::RESET_INPUT].setVoltage(10.f); tickS(32); m.inputs[Phona::RESET_INPUT].setVoltage(0.f); tickS(32);
+		assert(sing() == 2);
+		// a click on the panel
+		sc.clickReq = 0; tickS(32);
+		assert(sing() == 0);
+		// new text: the phrase ranges follow
+		sc.setPhrase(0, "one two three");
+		scriptReady(true);
+		assert(m.activeLyr->pLen[0] == 3 && m.activeLyr->pStart[2] == 3);
+		a = sing(); b = sing(); c = sing(); d = sing();
+		assert(a == 0 && b == 1 && c == 2 && d == 0);
+		// save and load
+		json_t* j = sc.dataToJson();
+		PhonaScript sc2;
+		sc2.dataFromJson(j);
+		json_decref(j);
+		assert(sc2.phrase(2) == "red blue green" && sc2.phrase(1).empty() && sc2.want == sc.want.load() && sc2.mask == 5u);
+		// Beatbox mode: the phrases are beat patterns
+		m.setBeatMode(true);
+		sc.setPhrase(0, "B t");
+		sc.setPhrase(2, "Pf");
+		scriptReady(true);
+		int beats[5];
+		for (int k = 0; k < 3; k++) { sing(); beats[k] = m.beatShown.load(); }
+		trig(PhonaScript::NEXT_INPUT);
+		for (int k = 3; k < 5; k++) { sing(); beats[k] = m.beatShown.load(); }
+		std::cout << "script beats: " << beats[0] << beats[1] << beats[2] << beats[3] << beats[4] << "\n";
+		assert(beats[0] == 1 && beats[1] == 3 && beats[2] == 1 && beats[3] == 2 && beats[4] == 2);
+		m.setBeatMode(false);
+		// Script removed: Phona's own text again
+		unlinkAll();
+		scriptReady(false);
+		assert(m.getLyrics() == "ignored when a script is on" && m.activeLyr->n > 0);
+		m.setLyrics(""); ready();
+		std::cout << "script test passed\n";
+	}
 
 	// Unlinked: the display falls back to the resting head and says where to put the module.
 	unlinkAll();

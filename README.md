@@ -25,6 +25,7 @@ The build is signed with an Apple Developer ID and notarized by Apple.
 | **Phona** | 20 HP | The voice. |
 | **Phona View** | 14 HP | Animated mouth and throat. |
 | **Phona Scope** | 20 HP | Instrument display: spectrum, formants, tract, vocal folds, vowel chart. |
+| **Phona Script** | 14 HP | 8 lyric phrases. A trigger or CV chooses the phrase. |
 | **Phona Lab** | 16 HP | Tuning tool for the sung consonants. |
 
 <img src="rack-plugin/docs/images/phona.png" width="300" alt="Phona panel">
@@ -57,8 +58,10 @@ and not finished.
 
 <img src="rack-plugin/docs/images/phona-view.png" width="280" alt="Phona View"> <img src="rack-plugin/docs/images/phona-scope.png" width="380" alt="Phona Scope">
 
-Put them next to Phona. They have no cables. You can put them on either side, and Phona Lab, View and
-Scope can be in a chain in any order. The link light comes on when the module finds a Phona.
+Put them next to Phona. They have no cables. You can put them on either side, and Phona Lab, View,
+Scope and Script can be in a chain in any order. You can use more than one View or Scope, for
+example one View for each voice. A chain can have up to 8 expanders on each side of Phona. The link
+light comes on when the module finds a Phona.
 
 - **Phona View** shows a side view of the head: the tract shape, the air pressure in the tract,
   airflow, noise at the place where it starts, the nasal passage when it is open, and the vocal folds
@@ -73,6 +76,23 @@ Scope can be in a chain in any order. The link light comes on when the module fi
   The formants come from a simple tube model of the tract shape. They are not measured from the engine's own filter.
 - The selector at the bottom chooses the voice: **F** follows the newest note, **1 to 4** show that voice.
 - Beatbox mode is not shown yet.
+
+### Phona Script
+
+Put it next to Phona (or in the chain of Phona expanders). It holds 8 phrases. While it is attached,
+its phrases replace the text in Phona's Lyrics field.
+
+- **Enter the phrases:** right-click > Phrase 1 to 8. Empty phrases are skipped. Up to 255 characters each.
+- Phona sings the current phrase, one syllable for each gate, and **repeats it** until you choose another phrase.
+- A new phrase starts at the **next gate**. The syllable that sings now finishes first.
+- **NEXT** (trigger): the next phrase. After the last phrase, phrase 1.
+- **RESET** (trigger): phrase 1, from its first syllable.
+- **SELECT** (CV): 0 to 10 V chooses phrase 1 to 8 (1.25 V for each phrase). A voltage for an empty phrase has no effect.
+- **Click** a phrase on the panel to choose it.
+- Phona's own RESET starts the current phrase again from its first syllable.
+- In Beatbox mode, each phrase is a beat pattern (`B t Pf .`).
+
+The phrase that sings is lit. The phrase that comes at the next gate has an amber frame.
 
 ### Phona Lab
 

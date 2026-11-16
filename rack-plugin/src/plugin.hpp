@@ -6,3 +6,4 @@ extern Model* modelPhona;
 extern Model* modelPhonaLab;
 extern Model* modelPhonaView;
 extern Model* modelPhonaScope;
+extern Model* modelPhonaScript;

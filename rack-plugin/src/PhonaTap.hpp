@@ -5,27 +5,45 @@
 #include <cstring>
 
 // Phona's display expanders (Phona View: the animated mouth and throat; Phona Scope: the
-// instrument display). They have no audio and no cables. Phona finds them beside itself, also
-// with other Phona expanders between (Lab, View, Scope in any order, on either side), captures the
-// voice each one shows about 40 times a second on the audio thread, and writes the snapshot into
+// instrument display). They have no audio and no cables. Phona finds all of them beside itself,
+// also with other Phona expanders between (Lab, View, Scope, Script in any order and number, on
+// either side), captures the voice each one shows about 40 times a second on the audio thread, and writes the snapshot into
 // the expander's triple buffer. The expander's widget reads the newest snapshot on the UI thread.
 
 // Phona's expanders: a chain of them may stand between Phona and the one it looks for.
 static inline bool phonaFamily(Module* m) {
-	return m && m->model && (m->model == modelPhonaLab || m->model == modelPhonaView || m->model == modelPhonaScope);
+	return m && m->model && (m->model == modelPhonaLab || m->model == modelPhonaView || m->model == modelPhonaScope
+		|| m->model == modelPhonaScript);
 }
-// The module of model `want` beside `m`, or further along a chain of Phona expanders.
+// How far along a chain Phona and its expanders look (both ways the same, so an expander that sees
+// Phona is also seen by it): Phona plus 8 expanders on each side.
+static constexpr int FAMILY_HOPS = 8;
+// The module of model `want` beside `m`, or further along a chain of Phona expanders (the nearest;
+// the left side first).
 static inline Module* familyNear(Module* m, Model* want) {
 	if (!want) return nullptr;
 	for (int dir = 0; dir < 2; dir++) {
 		Module* cur = dir ? m->rightExpander.module : m->leftExpander.module;
-		for (int hop = 0; hop < 4 && cur; hop++) {
+		for (int hop = 0; hop < FAMILY_HOPS && cur; hop++) {
 			if (cur->model == want) return cur;
 			if (!phonaFamily(cur)) break;
 			cur = dir ? cur->rightExpander.module : cur->leftExpander.module;
 		}
 	}
 	return nullptr;
+}
+// All modules of the models `a` or `b` in the chains on both sides of `m`, up to `max`. Returns the count.
+static inline int familyAll(Module* m, Model* a, Model* b, Module** out, int max) {
+	int n = 0;
+	for (int dir = 0; dir < 2; dir++) {
+		Module* cur = dir ? m->rightExpander.module : m->leftExpander.module;
+		for (int hop = 0; hop < FAMILY_HOPS && cur && n < max; hop++) {
+			if (!phonaFamily(cur)) break;
+			if (cur->model == a || cur->model == b) out[n++] = cur;
+			cur = dir ? cur->rightExpander.module : cur->leftExpander.module;
+		}
+	}
+	return n;
 }
 
 struct PhonaTap : Module {

@@ -204,6 +204,38 @@ comparison gave much larger numbers, but pitch drift smears it: do not use it. T
 (pressure 7.5e83), passes with 3. Not tested: lyrics consonants and beatbox in eco by ear (beat voices stay full).
 Ideas not done: a high shelf in eco to match full's top end; eco at 88.2/96 kHz with a coarser grid.
 
+### Phona Script and many displays (2026-11-15, version 2.4.0; not yet heard or seen live by the user)
+
+**Many displays.** Before, Phona fed only the nearest View and the nearest Scope (`familyNear`), but every
+other View in the chain still found Phona, so its link light came on with no data. Now `captureTaps` uses
+`familyAll` (`src/PhonaTap.hpp`) and feeds every View and Scope, up to `FAMILY_HOPS` = 8 expanders on each
+side. All walks (Phona's and the expanders') use the same limit, so a link light is on only when Phona
+also reaches that module. Measured, 4 voices with 8 Views: no CPU difference within noise (23.5% / 23.7%
+at 44.1 kHz).
+
+**Phona Script** (14 HP, `src/PhonaScript.hpp`/`.cpp`, panel from `tools/panel_view.py`). The user chose
+the design: 8 phrase slots typed in the module menu; the phrase repeats until changed; a change takes effect
+at the next gate; inputs NEXT, RESET (phrase 1, syllable 1), SELECT (0-10 V, 1.25 V per slot; an empty
+slot is ignored); a click on a phrase chooses it. While attached, the phrases replace Phona's own text
+(that text stays saved and comes back when the Script is removed). Works in Beatbox mode too.
+- Threads: the texts belong to the Script's UI thread. `publishLocked` copies them into fixed `pub`
+  arrays under a sequence lock (`pubSeq`). Phona's audio thread (`syncScript`, at each control tick)
+  copies them into its own `scriptText` (second sequence lock) and bumps `lyricsVersion`; the worker
+  (`readScriptText`) reads that. No pointer to the Script ever leaves the audio thread, and the audio
+  thread looks it up again each time (`familyNear`), so a deleted Script cannot be read.
+- One plan for all phrases: the worker joins the phrases and records each phrase's range
+  (`BuiltLyr::pStart/pLen`) as (syllables of the text up to its end) minus (those before it), so word
+  context cannot shift the ranges. A phrase change needs no rebuild: `nextItem` jumps `syl` to the
+  phrase's start when the Script's `want` changed or its `resetSeq` went up, then wraps inside the phrase.
+  The Script's `want` is chosen in `PhonaScript::process`; Phona writes back `current` for the display.
+- Test (`tests/view.sh`, all three rates): ranges for "one two" / empty / "red blue green", repeat,
+  NEXT mid-phrase (waits for the gate, skips the empty slot, wraps), RESET, SELECT (empty slot ignored),
+  Phona's RESET (start of the current phrase), click, text edit, JSON save and load, beatbox patterns,
+  removal (Phona's own text again). Also: Phona | 8 Views | Scope (the 9th: no data, no light).
+- Headless Rack (2.6.6 Pro, `-h`, temp user folder) loaded 2.4.0 with Phona + Script + 2 Views + Scope from
+  a patch, with no errors.
+- Not done: the Script's panel was not drawn to SVG for a look (only the headless load); not checked by ear.
+
 ### Phona View and Phona Scope: display expanders (2026-11-13, released in 2.2.0)
 
 Two expanders with no audio and no cables. Shared parts: `src/PhonaTap.hpp` (module base, triple

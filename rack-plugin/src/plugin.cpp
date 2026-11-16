@@ -6,4 +6,5 @@ void init(Plugin* p) {
 	p->addModel(modelPhonaLab);
 	p->addModel(modelPhonaView);
 	p->addModel(modelPhonaScope);
+	p->addModel(modelPhonaScript);
 }

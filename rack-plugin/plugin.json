@@ -1,7 +1,7 @@
 {
   "slug": "Phona",
   "name": "Phona",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "license": "MIT",
   "brand": "Phona",
   "author": "Spunoza",
@@ -36,6 +36,12 @@
       "name": "Phona Scope",
       "description": "Instrument display: put it next to a Phona (or its other expanders) to see the voice's spectrum, formants, tract area, glottal waveform and vowel chart",
       "tags": ["Visual", "Expander"]
+    },
+    {
+      "slug": "PhonaScript",
+      "name": "Phona Script",
+      "description": "Eight lyric phrases for Phona: a trigger or CV chooses the phrase, which repeats until the next change",
+      "tags": ["Utility", "Expander", "Sequencer"]
     }
   ]
 }
