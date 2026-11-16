@@ -107,8 +107,10 @@ int main(int argc, char** argv) {
 		for (int i = 0; i < (int) rate; i++) m.process(args);
 		return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 	};
+	// Fastest of 3 runs each, alternated: a shared (cloud) machine adds noise of 5-10% to one run.
 	cpu(false);
-	double without = cpu(false), with = cpu(true);
+	double without = 1e9, with = 1e9;
+	for (int r = 0; r < 3; r++) { without = std::min(without, cpu(false)); with = std::min(with, cpu(true)); }
 	std::cout << "3 voices: " << 100.0 * without << "% of one core; with View " << 100.0 * with << "%\n";
 	assert(with < without * 1.05 + 0.01);
 	for (int c = 0; c < 3; c++) gate.setVoltage(0.f, c);
@@ -295,11 +297,15 @@ int main(int argc, char** argv) {
 				for (int i = 0; i < (int) rate; i++) m.process(args);
 				return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 			};
-			double with8 = run();
-			m.rightExpander.module = nullptr;
-			double none = run();
+			// fastest of 3 runs each, alternated (see the 1-View check)
+			double with8 = 1e9, none = 1e9;
+			for (int r = 0; r < 3; r++) {
+				m.rightExpander.module = &vs[0];
+				with8 = std::min(with8, run());
+				m.rightExpander.module = nullptr;
+				none = std::min(none, run());
+			}
 			m.rightExpander.module = &vs[0];
-			with8 = std::min(with8, run());
 			std::cout << "4 voices: " << 100.0 * none << "% of one core; with 8 Views " << 100.0 * with8 << "%\n";
 			assert(with8 < none * 1.05 + 0.01);
 		}
