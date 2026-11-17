@@ -27,7 +27,7 @@ for t in beatbox poly view; do
 done
 
 echo "== The built plugin file in Rack's engine with Fundamental modules (patch tests)"
-RACK_SDK=$(cd "$RACK_DIR" && pwd) PHONA_DIR=$(pwd)/dist/Phona sh tests/patches/check.sh 2>&1 | tee -a "$LOG" | quiet
+RACK_SDK=$(cd "$RACK_DIR" && pwd) PHONA_DIR=$(pwd)/dist/Spunoza sh tests/patches/check.sh 2>&1 | tee -a "$LOG" | quiet
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
 	{

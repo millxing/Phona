@@ -4,7 +4,7 @@
 set -eu
 : "${RACK_SDK:?Set RACK_SDK to the existing Rack-SDK directory}"
 : "${RACK_PLUGINS:?Set RACK_PLUGINS to the installed plugins directory}"
-PHONA_DIR=${PHONA_DIR:-"$RACK_PLUGINS/Phona"}
+PHONA_DIR=${PHONA_DIR:-"$RACK_PLUGINS/Spunoza"}
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 TEST_TMP=$(mktemp -d "${TMPDIR:-/tmp}/phona-patch-test.XXXXXX")
 trap 'rm -rf "$TEST_TMP"' EXIT HUP INT TERM

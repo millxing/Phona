@@ -14,7 +14,7 @@ All four builds pass the same automatic tests.
 ## Download and install
 
 1. Download the newest `.vcvplugin` file for your system from [Releases](https://github.com/millxing/Phona/releases).
-2. Close Rack. Remove older Phona `.vcvplugin` files from the plugins folder, then put the new file there:
+2. Close Rack. Remove older Phona files from the plugins folder (the `Phona` folder and `Phona-*.vcvplugin` files from 2.4.1 and older; newer versions use the name `Spunoza`), then put the new file there:
    - Mac (Apple Silicon): `~/Library/Application Support/Rack2/plugins-mac-arm64/`
    - Mac (Intel): `~/Library/Application Support/Rack2/plugins-mac-x64/`
    - Windows: `%LOCALAPPDATA%\Rack2\plugins-win-x64\`

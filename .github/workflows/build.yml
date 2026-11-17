@@ -132,9 +132,9 @@ jobs:
           RUST_TARGET: ${{ matrix.rust_target }}
         run: |
           make -j4 dist CROSS_COMPILE=x86_64-apple-darwin
-          lipo -archs dist/Phona/plugin.dylib
-          [ "$(lipo -archs dist/Phona/plugin.dylib)" = x86_64 ]
-          echo "Oldest macOS:"; otool -l dist/Phona/plugin.dylib | grep -A4 -E 'LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX' | grep -E 'minos|version'
+          lipo -archs dist/Spunoza/plugin.dylib
+          [ "$(lipo -archs dist/Spunoza/plugin.dylib)" = x86_64 ]
+          echo "Oldest macOS:"; otool -l dist/Spunoza/plugin.dylib | grep -A4 -E 'LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX' | grep -E 'minos|version'
 
       - uses: actions/upload-artifact@v4
         with:

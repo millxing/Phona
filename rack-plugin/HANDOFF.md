@@ -39,7 +39,7 @@ The original project brief is `../CHIMERA-RACK-HANDOFF.md`; this file supersedes
 
 ## What exists
 
-One module, **Phona** (plugin slug `Phona`, brand "Phona"), wraps
+One module, **Phona** (plugin slug `Spunoza`, brand "Spunoza"; was `Phona` up to 2.4.1), wraps
 [jamesondh/chimera-vocal-synth](https://github.com/jamesondh/chimera-vocal-synth), a Rust physical-modeling
 (FDTD tube network) vocal synth, as a monophonic VCV Rack 2 module. The user has tested it live in
 VCV Rack Pro 2.6.6 on macOS arm64. Real-time modulation works, and that was the go/no-go condition.
@@ -53,6 +53,11 @@ The plugin and the module are both called **Phona** (plugin slug `Phona`, module
 Before that they were `ChimeraVoice` / `Singer` (2.0.0); older notes below were renamed by search and replace.
 Rack 2 only loads plugins whose version starts with `2.`, so the user's "version 1.0" is 2.1.0. Patches saved
 with the old slugs do not find the new module. The engine and the Rust wrapper keep the name Chimera.
+
+**2026-11-17:** VCV's Library check asked for a brand name as the plugin name. Plugin slug, name and brand are
+now `Spunoza`. Module slugs and names did not change (Phona, PhonaLab, PhonaView, PhonaScope, PhonaScript).
+Patches saved with 2.4.1 or older have `"plugin": "Phona"` and do not find the modules. Build folder is now
+`dist/Spunoza`, share files are `share/Spunoza-<version>-<arch>.vcvplugin`.
 
 ## Sharing a build
 

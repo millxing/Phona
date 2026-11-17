@@ -12,7 +12,7 @@ def patch(held=False, beat=False):
     modules = []
     def module(model, pos, changes=None, data=None):
         schema = SCHEMA[model]
-        m = dict(id=len(modules)+1, plugin='Core' if model=='Notes' else 'Phona' if model=='Phona' else 'Fundamental',
+        m = dict(id=len(modules)+1, plugin='Core' if model=='Notes' else 'Spunoza' if model=='Phona' else 'Fundamental',
                  model=model, version='2.6.6' if model=='Notes' else '2.1.0' if model=='Phona' else '2.6.4',
                  pos=pos, params=[dict(id=p['id'], value=(changes or {}).get(p['id'],p['default'])) for p in schema['params']])
         if 'data' in schema: m['data']=copy.deepcopy(schema['data'])

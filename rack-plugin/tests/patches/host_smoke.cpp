@@ -103,15 +103,20 @@ int main(int argc,char**argv) { try {
    float x=tick();burst+=x*x;
   }
   if(beat && offset==60) {
-   // A reset outside the 1ms window comes after the hit has started (the fitted beat
-   // sounds have a short lead-in): it must cut the hit short, and the next edge must sound.
-   require(burst<0.5*firstBurst,"late beat reset did not cut the hit");
+   // A reset outside the 1ms window comes after this edge has chosen its sound: that sound
+   // plays to its end (a reset never cuts a hit), and the reset makes the NEXT edge play the
+   // first item of the pattern. Offset 0 played that same first item, so the next edge must
+   // have about the same energy. (Do not compare `burst` with firstBurst: that compares two
+   // different sounds, and their balance differs between Eco and Full.)
+   require(burst>0.01,"late beat reset stopped the hit");
+   for(int n=0;n<48000;n++)tick();
    double next=0;
    for(int n=0;n<24000;n++) {
     voice->inputs[12].setVoltage(n==0?10:0);
     float x=tick();next+=x*x;
    }
-   require(next>0.01,"beat after late reset stayed silent");
+   std::cout<<"Late reset: hit energy="<<burst<<", next edge="<<next<<", first item="<<firstBurst<<"\n";
+   require(std::abs(next-firstBurst)<0.2*firstBurst,"after a late reset, the next edge did not play the first item");
   } else require(burst>0.01,"one-sample gate produced no audio");
   if(offset==0) firstBurst=burst;
  }

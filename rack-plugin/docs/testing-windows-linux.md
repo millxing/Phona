@@ -10,7 +10,7 @@ It takes about 15 minutes. You need no special knowledge, only VCV Rack 2 and he
 
 - **Windows** 10 or 11 (64-bit), or **Linux** (64-bit x86, Ubuntu 20.04 or newer, or a similar distribution).
 - **VCV Rack 2.6** or newer. Rack Free is enough.
-- The file `Phona-2.4.1-win-x64.vcvplugin` (Windows) or `Phona-2.4.1-lin-x64.vcvplugin` (Linux).
+- The file `Spunoza-<version>-win-x64.vcvplugin` (Windows) or `Spunoza-<version>-lin-x64.vcvplugin` (Linux).
   Rob gives you the link.
 
 ## Install
@@ -22,7 +22,7 @@ It takes about 15 minutes. You need no special knowledge, only VCV Rack 2 and he
    - Linux: `~/.local/share/Rack2/plugins-lin-x64/`
 3. Start Rack. Rack unpacks the file. You do not need to do anything else.
 
-To remove Phona later: close Rack, then delete the `Phona` folder and the `.vcvplugin` file from the
+To remove Phona later: close Rack, then delete the `Spunoza` folder and the `.vcvplugin` file from the
 same plugins folder.
 
 ## Tests
