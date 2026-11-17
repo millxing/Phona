@@ -215,7 +215,14 @@ bodies; [u] F2 a little higher (-3..-7 dB at 1 kHz, +5..+9 at 1.26 kHz); 2-8 kHz
 +17); 10 kHz -4..-8 dB. Glottal area and flow are the same in both (vis capture). A harmonic-by-harmonic
 comparison gave much larger numbers, but pitch drift smears it: do not use it. Test `eco_is_stable_at_the_extremes`
 (lib.rs; all control extremes, both bodies, 44.1/48/96 kHz; tract pressure bound) fails with the old minimum of 8
-(pressure 7.5e83), passes with 3. Not tested: lyrics consonants and beatbox in eco by ear (beat voices stay full).
+(pressure 7.5e83), passes with 3. Not tested: lyrics consonants in eco by ear.
+Beatbox in eco (2026-11-17, not yet released): the beat mouths now follow the voice's quality
+(`BeatVoice::new(.., eco)`). Test `beat_eco_is_stable` (eco and full, 44.1/48/96 kHz, both bodies, single
+hits, 125 ms pattern, 30 ms retriggers) passes. `bench_beat` (PHONA_FIT_ECO=1), a hit every 125 ms:
+16.5% -> 7.5% of real time. The table (`BEAT_FIT`) was fitted on full; in eco the beat-fit-01 loss
+rises (hat 8.6 -> 9.6, kick 8.3 -> 10.0, snare 15.4 -> 19.8; snare centroid 778 -> 1896 Hz) and the
+kit balance changes (`table_pattern` peaks full B/Pf/t 0.60/0.51/0.34, eco 0.38/0.85/0.59). The user
+heard the normalised reference files and judged eco "fine". Option not done: a separate eco fit table.
 Ideas not done: a high shelf in eco to match full's top end; eco at 88.2/96 kHz with a coarser grid.
 
 ### Phona Script and many displays (2026-11-15, version 2.4.0; not yet heard or seen live by the user)

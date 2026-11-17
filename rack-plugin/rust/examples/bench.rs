@@ -29,13 +29,22 @@ fn main() {
         let c0 = cpu_secs();
         let mut out = 0f32;
         let ext = 0f32;
+        // BLOCK=k: render k samples per call (chim_render, no external input) instead of one
+        let block: usize = std::env::var("BLOCK").ok().and_then(|s| s.parse().ok()).unwrap_or(1);
+        let mut buf = vec![0f32; block.max(1)];
         for i in 0..n {
             if i % 16 == 0 {
                 let t = if held { 0.0 } else { i as f64 / fs };
                 let p = ChimParams { f0, pressure: 8.0, breathiness: 0.15, tension: 0.5, brightness: 0.25, roughness: 0.1, vib_depth: 30.0, vib_rate: 5.5, vowel: 2.0 + 2.0 * (t * 0.7).sin(), gate: 1.0, glide: 0.06, fry: 0.0, velum: -0.25 + 1.65 * (0.3 + 0.3 * (t * 0.4).sin()), larynx: 0.0, ventricular: 0.0 };
                 chim_set(v, &p);
             }
-            chim_render_ext(v, &ext, &mut out, 1);
+            if block > 1 {
+                let k = i % block;
+                if k == 0 { chim_render(v, buf.as_mut_ptr(), block); }
+                out = buf[k];
+            } else {
+                chim_render_ext(v, &ext, &mut out, 1);
+            }
             sum += (out as f64) * (out as f64);
             hash = hash.wrapping_mul(0x100000001b3).wrapping_add(out.to_bits() as u64);
         }

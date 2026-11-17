@@ -636,9 +636,10 @@ struct BeatVoice {
 }
 
 impl BeatVoice {
-    /// Allocates and runs the model for `BEAT_SETTLE` seconds: off the audio thread.
-    fn new(fs: f64, body: BodyMix, sound: usize, fit: &BeatFit) -> BeatVoice {
-        let mut engine = Engine::new(fs);
+    /// Allocates and runs the model for `BEAT_SETTLE` seconds: off the audio thread. `eco`: the
+    /// same quality as the singing voice (see `chim_new_eco`).
+    fn new(fs: f64, body: BodyMix, sound: usize, fit: &BeatFit, eco: bool) -> BeatVoice {
+        let mut engine = Engine::new_with(fs, eco);
         engine.set_body(body);
         engine.voice_mut().airway.tract.velum_junction = true;
         engine.voice_mut().artic.settle = true;
@@ -1191,7 +1192,7 @@ pub extern "C" fn chim_new_eco(sample_rate: f64, female: f64, child: f64, eco: i
         engine.render(&mut warm);
         let noise_base = engine.voice().airway.noise_gain.glottis;
         let (noise_base_all, band_base) = (engine.voice().airway.noise_gain, engine.voice().airway.noise_band);
-        let beat_voices: Vec<BeatVoice> = BEAT_VOICES.iter().map(|k| BeatVoice::new(fs, body, *k, &BEAT_FIT[*k])).collect();
+        let beat_voices: Vec<BeatVoice> = BEAT_VOICES.iter().map(|k| BeatVoice::new(fs, body, *k, &BEAT_FIT[*k], eco)).collect();
         let viscous_base = engine.voice().airway.net.viscous_scale;
         // the View's telemetry: the first fill sizes its buffers (allocates), later ones reuse them
         let mut vis_tele = chimera::voice::human_voice::VoiceTelemetry::default();
@@ -1526,6 +1527,53 @@ mod tests {
                         }
                         assert!(pmax < P_MAX, "eco {eco} fs {fs} female {female} {name}: max pressure {pmax:.3e}");
                     }
+                    chim_free(v);
+                }
+            }
+        }
+    }
+
+    /// Beat mouths follow the voice's quality. In eco they stay stable through isolated hits,
+    /// patterns and fast retriggers of every sound, for both bodies and the usual rates.
+    #[test]
+    fn beat_eco_is_stable() {
+        const P_MAX: f64 = 2.0e5; // as in `eco_is_stable_at_the_extremes`
+        for eco in [1, 0] {
+            for fs in [44100.0, 48000.0, 96000.0] {
+                for female in [0.0, 1.0] {
+                    let v = chim_new_eco(fs, female, 0.0, eco);
+                    assert!(!v.is_null());
+                    let want_eco = eco == 1 && fs < 60000.0;
+                    for b in unsafe { &*v }.beat_voices.iter() {
+                        assert_eq!(b.engine.voice().m == 1, want_eco || fs >= 60000.0, "eco {eco} fs {fs}: beat mouth quality");
+                    }
+                    chim_beat_hit(v, 0);
+                    chim_set_beatbox(v, 1);
+                    let fsu = fs as usize;
+                    // (token, sample): each sound alone, a 125 ms pattern, then 30 ms retriggers
+                    let mut hits: Vec<(i32, usize)> = vec![(1, fsu / 4), (2, fsu), (3, 7 * fsu / 4)];
+                    for (i, t) in [1, 3, 2, 3, 1, 1, 2, 3, 1, 3, 2, 2].iter().enumerate() { hits.push((*t, 5 * fsu / 2 + i * fsu / 8)); }
+                    for i in 0..24 { hits.push(([1, 2, 3][i % 3], 4 * fsu + i * 3 * fsu / 100)); }
+                    let mut out = [0f32; 16];
+                    let (mut pmax, mut peak) = (0f64, 0f32);
+                    for k in 0..(6 * fsu / 16) {
+                        for (t, at) in &hits {
+                            if *at / 16 == k { chim_beat_hit(v, *t); }
+                        }
+                        chim_render(v, out.as_mut_ptr(), 16);
+                        assert!(out.iter().all(|x| x.is_finite()));
+                        peak = out.iter().fold(peak, |m, x| m.max(x.abs()));
+                        for b in unsafe { &*v }.beat_voices.iter() {
+                            let net = &b.engine.voice().airway.net;
+                            for &x in &net.p[..net.n_nodes] {
+                                pmax = pmax.max(if x.is_finite() { x.abs() } else { f64::INFINITY });
+                            }
+                        }
+                    }
+                    assert_eq!(chim_is_dead(v), 0, "eco {eco} fs {fs} female {female}: dead");
+                    assert!(pmax < P_MAX, "eco {eco} fs {fs} female {female}: max beat pressure {pmax:.3e}");
+                    assert!(peak > 0.02, "eco {eco} fs {fs} female {female}: silent ({peak})");
+                    println!("eco {eco} fs {fs} female {female}: max beat pressure {pmax:.3e}, output peak {peak:.3}");
                     chim_free(v);
                 }
             }

@@ -314,8 +314,10 @@ fn fit_from(kv: &[(String, f64)]) -> BeatFit {
 
 /// Hits through `chim_beat_hit`, as the module plays them: `hits` = (token, sample). `fit`
 /// replaces the table entry of `token0` when given. Returns the render from the first hit on.
+/// PHONA_FIT_ECO=1 renders in eco quality.
 fn play(hits: &[(i32, usize)], fit: Option<(i32, BeatFit)>, len: usize) -> Vec<f32> {
-    let ptr = chim_new(FS as f64, 0.0, 0.0);
+    let eco = std::env::var("PHONA_FIT_ECO").is_ok_and(|x| x == "1") as i32;
+    let ptr = chim_new_eco(FS as f64, 0.0, 0.0, eco);
     assert!(!ptr.is_null());
     if let Some((token, f)) = fit {
         // as `chim_new` does with the table's values: the mouths of this sound come to rest in its posture
@@ -447,7 +449,8 @@ fn dump_gestures() {
 #[ignore = "timing; prints"]
 fn bench_beat() {
     let t = std::time::Instant::now();
-    let v = chim_new(FS as f64, 0.0, 0.0);
+    let eco = std::env::var("PHONA_FIT_ECO").is_ok_and(|x| x == "1") as i32; // 1: eco quality
+    let v = chim_new_eco(FS as f64, 0.0, 0.0, eco);
     println!("chim_new: {:.0} ms", t.elapsed().as_secs_f64() * 1e3);
     let mut out = [0f32; 64];
     let p = ChimParams { gate: 1.0, ..P0 };
